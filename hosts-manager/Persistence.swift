@@ -1,57 +1,275 @@
-//
-//  Persistence.swift
-//  hosts-manager
-//
-//  Created by Breeze on 2026-08-19.
-//
-
+import Combine
 import CoreData
 
-struct PersistenceController {
+/// Programmatic Core Data model for the hosts manager.
+/// Built in code instead of an `.xcdatamodeld` to keep entity wiring explicit.
+@MainActor
+final class PersistenceController: ObservableObject {
     static let shared = PersistenceController()
 
-    @MainActor
     static let preview: PersistenceController = {
-        let result = PersistenceController(inMemory: true)
-        let viewContext = result.container.viewContext
-        for _ in 0..<10 {
-            let newItem = Item(context: viewContext)
-            newItem.timestamp = Date()
-        }
-        do {
-            try viewContext.save()
-        } catch {
-            // Replace this implementation with code to handle the error appropriately.
-            // fatalError() causes the application to generate a crash log and terminate. You should not use this function in a shipping application, although it may be useful during development.
-            let nsError = error as NSError
-            fatalError("Unresolved error \(nsError), \(nsError.userInfo)")
-        }
-        return result
+        let controller = PersistenceController(inMemory: true)
+        return controller
     }()
 
-    let container: NSPersistentCloudKitContainer
+    var container: NSPersistentContainer
+    @Published private(set) var loadError: String?
 
     init(inMemory: Bool = false) {
-        container = NSPersistentCloudKitContainer(name: "hosts_manager")
+        container = NSPersistentContainer(name: "hosts_manager", managedObjectModel: Self.model)
+        loadError = nil
+        container.persistentStoreDescriptions.first?.shouldMigrateStoreAutomatically = true
+        container.persistentStoreDescriptions.first?.shouldInferMappingModelAutomatically = true
         if inMemory {
-            container.persistentStoreDescriptions.first!.url = URL(fileURLWithPath: "/dev/null")
+            container.persistentStoreDescriptions.first?.url = URL(fileURLWithPath: "/dev/null")
         }
-        container.loadPersistentStores(completionHandler: { (storeDescription, error) in
-            if let error = error as NSError? {
-                // Replace this implementation with code to handle the error appropriately.
-                // fatalError() causes the application to generate a crash log and terminate. You should not use this function in a shipping application, although it may be useful during development.
-
-                /*
-                 Typical reasons for an error here include:
-                 * The parent directory does not exist, cannot be created, or disallows writing.
-                 * The persistent store is not accessible, due to permissions or data protection when the device is locked.
-                 * The device is out of space.
-                 * The store could not be migrated to the current model version.
-                 Check the error message to determine what the actual problem was.
-                 */
-                fatalError("Unresolved error \(error), \(error.userInfo)")
-            }
-        })
         container.viewContext.automaticallyMergesChangesFromParent = true
+        loadError = loadStores()
+    }
+
+    func retryLoad() {
+        loadError = loadStores()
+    }
+
+    func resetStore() {
+        let urls = [
+            persistentStoreURL,
+            persistentStoreURL.appendingPathExtension("wal"),
+            persistentStoreURL.appendingPathExtension("shm")
+        ]
+        for url in urls where FileManager.default.fileExists(atPath: url.path) {
+            try? FileManager.default.removeItem(at: url)
+        }
+        container = NSPersistentContainer(name: "hosts_manager", managedObjectModel: Self.model)
+        container.persistentStoreDescriptions.first?.shouldMigrateStoreAutomatically = true
+        container.persistentStoreDescriptions.first?.shouldInferMappingModelAutomatically = true
+        container.viewContext.automaticallyMergesChangesFromParent = true
+        loadError = loadStores()
+    }
+
+    var storeDirectoryURL: URL {
+        persistentStoreURL.deletingLastPathComponent()
+    }
+
+    private var persistentStoreURL: URL {
+        container.persistentStoreDescriptions.first?.url
+            ?? NSPersistentContainer.defaultDirectoryURL()
+                .appendingPathComponent("hosts_manager.sqlite")
+    }
+
+    private func loadStores() -> String? {
+        var storeError: Error?
+        container.loadPersistentStores { _, error in
+            storeError = error
+        }
+        if let storeError {
+            return storeError.localizedDescription
+        }
+        do {
+            try ensureDefaults()
+            return nil
+        } catch {
+            return error.localizedDescription
+        }
+    }
+
+    /// Migrate an existing store (or seed a fresh one) so there is exactly one
+    /// read-only "系统" profile plus at least one editable custom profile.
+    func ensureDefaults() throws {
+        let context = container.viewContext
+        let all = try context.fetch(Profile.fetchRequest())
+
+        if all.isEmpty {
+            try seed()
+            return
+        }
+
+        if let system = all.first(where: { $0.name == "系统" }) {
+            system.isSystem = true
+            system.isActive = false
+            for entry in system.sortedEntries { context.delete(entry) }
+        } else {
+            let system = Profile(context: context)
+            system.id = UUID()
+            system.name = "系统"
+            system.isActive = false
+            system.isSystem = true
+            system.createdAt = Date()
+            system.updatedAt = Date()
+        }
+
+        if all.filter({ !$0.isSystem }).isEmpty {
+            let profile = Profile(context: context)
+            profile.id = UUID()
+            profile.name = "默认"
+            profile.isActive = true
+            profile.isSystem = false
+            profile.createdAt = Date()
+            profile.updatedAt = Date()
+        }
+
+        if try context.count(for: AppSettings.fetchRequest()) == 0 {
+            let settings = AppSettings(context: context)
+            settings.id = UUID()
+            settings.backupRetention = 30
+            settings.defaultView = "list"
+        } else if let settings = try context.fetch(AppSettings.fetchRequest()).first {
+            if settings.defaultView == nil {
+                settings.defaultView = "list"
+            }
+        }
+        // Repair any entries that were previously mis-flagged as system.
+        for profile in try context.fetch(Profile.fetchRequest()) {
+            for entry in profile.sortedEntries {
+                let isSys = entry.hostList.contains { HostsParser.systemNames.contains($0.lowercased()) }
+                if entry.isSystem != isSys { entry.isSystem = isSys }
+            }
+        }
+        try context.save()
+    }
+
+    func seed() throws {
+        let context = container.viewContext
+        guard try context.count(for: Profile.fetchRequest()) == 0 else { return }
+
+        // Read-only system profile: always shows the live /etc/hosts.
+        let systemProfile = Profile(context: context)
+        systemProfile.id = UUID()
+        systemProfile.name = "系统"
+        systemProfile.isActive = false
+        systemProfile.isSystem = true
+        systemProfile.createdAt = Date()
+        systemProfile.updatedAt = Date()
+
+        // Editable default custom profile.
+        let profile = Profile(context: context)
+        profile.id = UUID()
+        profile.name = "默认"
+        profile.isActive = true
+        profile.isSystem = false
+        profile.createdAt = Date()
+        profile.updatedAt = Date()
+
+        // Import the real non-system entries from /etc/hosts into the first custom profile.
+        let userEntries = HostsParser.parse(HostsWriter.currentContent()).filter { !$0.isSystem }
+        if userEntries.isEmpty {
+            addEntry(to: profile, ip: "127.0.0.1", hosts: ["api.dev.local"], desc: "本地 API 服务", enabled: true, system: false)
+            addEntry(to: profile, ip: "192.168.1.50", hosts: ["mysql.db.local"], desc: "开发数据库", enabled: true, system: false)
+        } else {
+            for item in userEntries {
+                addEntry(to: profile, ip: item.ip, hosts: item.hostnames, desc: item.desc, enabled: item.isEnabled, system: false)
+            }
+        }
+
+        let settings = AppSettings(context: context)
+        settings.id = UUID()
+        settings.backupRetention = 30
+        settings.defaultProfileID = profile.id
+        settings.defaultView = "list"
+
+        try context.save()
+    }
+
+    private func addEntry(to profile: Profile, ip: String, hosts: [String], desc: String, enabled: Bool, system: Bool) {
+        let entry = HostEntry(context: container.viewContext)
+        entry.id = UUID()
+        entry.profile = profile
+        entry.ip = ip
+        entry.hostnames = hosts
+        entry.desc = desc
+        entry.isEnabled = enabled
+        entry.isSystem = system
+        entry.sortIndex = Int64(profile.hostEntries?.count ?? 0)
+        entry.createdAt = Date()
+    }
+
+    /// Programmatically declared entities: Profile, HostEntry, BackupRecord, AppSettings.
+    static let model: NSManagedObjectModel = {
+        let model = NSManagedObjectModel()
+
+        let profile = entity("Profile", className: Profile.self)
+        profile.properties = [
+            attribute("id", .UUIDAttributeType, optional: false),
+            attribute("name", .stringAttributeType),
+            attribute("isActive", .booleanAttributeType, defaultValue: false),
+            attribute("isSystem", .booleanAttributeType, defaultValue: false),
+            attribute("isEnabled", .booleanAttributeType, defaultValue: true),
+            attribute("createdAt", .dateAttributeType),
+            attribute("updatedAt", .dateAttributeType)
+        ]
+
+        let entry = entity("HostEntry", className: HostEntry.self)
+        let hostnames = NSAttributeDescription()
+        hostnames.name = "hostnames"
+        hostnames.attributeType = .transformableAttributeType
+        hostnames.attributeValueClassName = "Swift.Array<Swift.String>"
+        hostnames.isOptional = false
+        entry.properties = [
+            attribute("id", .UUIDAttributeType, optional: false),
+            hostnames,
+            attribute("ip", .stringAttributeType),
+            attribute("desc", .stringAttributeType),
+            attribute("isEnabled", .booleanAttributeType, defaultValue: true),
+            attribute("isSystem", .booleanAttributeType, defaultValue: false),
+            attribute("sortIndex", .integer64AttributeType, defaultValue: 0),
+            attribute("createdAt", .dateAttributeType)
+        ]
+
+        let backup = entity("BackupRecord", className: BackupRecord.self)
+        backup.properties = [
+            attribute("id", .UUIDAttributeType, optional: false),
+            attribute("timestamp", .dateAttributeType),
+            attribute("filePath", .stringAttributeType),
+            attribute("profileName", .stringAttributeType),
+            attribute("note", .stringAttributeType)
+        ]
+
+        let settings = entity("AppSettings", className: AppSettings.self)
+        settings.properties = [
+            attribute("id", .UUIDAttributeType, optional: false),
+            attribute("backupRetention", .integer64AttributeType, defaultValue: 30),
+            attribute("defaultProfileID", .UUIDAttributeType),
+            attribute("defaultView", .stringAttributeType, defaultValue: "list")
+        ]
+
+        let entries = NSRelationshipDescription()
+        entries.name = "hostEntries"
+        entries.destinationEntity = entry
+        entries.deleteRule = .cascadeDeleteRule
+        entries.isOptional = true
+        entries.minCount = 0
+        entries.maxCount = 0
+
+        let belongsTo = NSRelationshipDescription()
+        belongsTo.name = "profile"
+        belongsTo.destinationEntity = profile
+        belongsTo.deleteRule = .nullifyDeleteRule
+        belongsTo.isOptional = true
+        belongsTo.minCount = 0
+        belongsTo.maxCount = 1
+
+        entries.inverseRelationship = belongsTo
+        belongsTo.inverseRelationship = entries
+        profile.properties.append(entries)
+        entry.properties.append(belongsTo)
+
+        model.entities = [profile, entry, backup, settings]
+        return model
+    }()
+
+    private static func entity<T: NSManagedObject>(_ name: String, className: T.Type) -> NSEntityDescription {
+        let entity = NSEntityDescription()
+        entity.name = name
+        entity.managedObjectClassName = NSStringFromClass(className)
+        return entity
+    }
+
+    private static func attribute(_ name: String, _ type: NSAttributeType, optional: Bool = true, defaultValue: Any? = nil) -> NSAttributeDescription {
+        let attr = NSAttributeDescription()
+        attr.name = name
+        attr.attributeType = type
+        attr.isOptional = optional
+        if let value = defaultValue { attr.defaultValue = value }
+        return attr
     }
 }

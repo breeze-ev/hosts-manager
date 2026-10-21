@@ -23,14 +23,43 @@ final class hosts_managerUITests: XCTestCase {
     }
 
     @MainActor
-    func testExample() throws {
-        // UI tests must launch the application that they test.
+    func testSystemProfileCannotOpenApplyFlowWithKeyboardShortcut() throws {
         let app = XCUIApplication()
+        app.launchArguments += ["-AppleLanguages", "(zh-Hans)", "-AppleLocale", "zh_CN"]
         app.launch()
 
-        // Use XCTAssert and related functions to verify your tests produce the correct results.
-        // XCUIAutomation Documentation
-        // https://developer.apple.com/documentation/xcuiautomation
+        let systemProfile = app.buttons["profile-row-系统"]
+        XCTAssertTrue(systemProfile.waitForExistence(timeout: 8))
+        systemProfile.click()
+
+        app.typeKey("s", modifierFlags: .command)
+        XCTAssertFalse(app.buttons["confirm-apply-button"].waitForExistence(timeout: 1))
+    }
+
+    @MainActor
+    func testEditorOpensWithoutHanging() throws {
+        let app = XCUIApplication()
+        app.launchArguments += ["-AppleLanguages", "(zh-Hans)", "-AppleLocale", "zh_CN"]
+        app.launch()
+
+        let defaultProfile = app.buttons["profile-row-默认"]
+        XCTAssertTrue(defaultProfile.waitForExistence(timeout: 8))
+        defaultProfile.click()
+
+        let editMode = app.radioButtons["pencil"].firstMatch
+        XCTAssertTrue(editMode.waitForExistence(timeout: 4))
+        editMode.click()
+
+        let validate = app.descendants(matching: .any)
+            .matching(NSPredicate(format: "label == %@ OR label == %@", "校验", "Validate"))
+            .firstMatch
+        if !validate.waitForExistence(timeout: 8) {
+            let attachment = XCTAttachment(screenshot: app.screenshot())
+            attachment.name = "EditorFailure"
+            attachment.lifetime = .keepAlways
+            add(attachment)
+            XCTFail("Editor toolbar did not appear after switching to edit mode.")
+        }
     }
 
     @MainActor

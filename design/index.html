@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Hosts Manager</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="desktop" id="desktop">
+    <div class="window" id="window">
+      <header class="toolbar glass" id="toolbar">
+        <div class="traffic">
+          <span class="dot close"></span>
+          <span class="dot minimize"></span>
+          <span class="dot zoom"></span>
+        </div>
+        <div class="toolbar-title">
+          <span class="app-mark" aria-hidden="true">
+            <svg viewBox="0 0 24 24" width="16" height="16"><path fill="currentColor" d="M5 6h14v3H5zM5 11h10v3H5zM5 16h8v3H5z"/></svg>
+          </span>
+          <span class="title-text" data-i18n="title">Hosts Manager</span>
+        </div>
+        <div class="toolbar-actions">
+          <div class="seg" id="editModeSeg" role="tablist">
+            <button class="seg-btn active" data-mode="list" role="tab" data-i18n="list">列表</button>
+            <button class="seg-btn" data-mode="source" role="tab" data-i18n="source">源码</button>
+          </div>
+          <button class="btn btn-ghost" id="toggleThemeBtn" title="Appearance">
+            <svg viewBox="0 0 24 24" width="16" height="16" class="ic"><circle cx="12" cy="12" r="4.4" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M12 3v2.2M12 18.8V21M3 12h2.2M18.8 12H21M5.6 5.6l1.6 1.6M16.8 16.8l1.6 1.6M18.4 5.6l-1.6 1.6M7.2 16.8l-1.6 1.6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+          </button>
+          <button class="btn btn-primary" id="applyBtn">
+            <svg viewBox="0 0 24 24" width="16" height="16" class="ic"><path d="M12 3v11m0 0l-4-4m4 4l4-4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M4 16v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+            <span data-i18n="apply">应用</span>
+          </button>
+        </div>
+      </header>
+
+      <div class="body">
+        <aside class="sidebar glass" id="sidebar">
+          <div class="search-wrap">
+            <svg viewBox="0 0 24 24" width="15" height="15" class="search-ic"><circle cx="11" cy="11" r="6.5" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M16 16l4 4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+            <input type="text" id="profileSearch" class="search-input" data-i18n-ph="searchProfile" placeholder="搜索配置" autocomplete="off">
+          </div>
+
+          <div class="sidebar-label" data-i18n="profiles">配置</div>
+          <div class="profile-list" id="profileList"></div>
+
+          <button class="btn btn-ghost btn-new" id="newProfileBtn">
+            <svg viewBox="0 0 24 24" width="16" height="16" class="ic"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+            <span data-i18n="newProfile">新建配置</span>
+          </button>
+
+          <nav class="sidebar-nav" id="sidebarNav">
+            <button class="nav-item" data-view="backups">
+              <svg viewBox="0 0 24 24" width="17" height="17" class="ic"><path d="M5 8h14M5 12h14M5 16h14" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><rect x="5" y="4" width="14" height="16" rx="2.5" fill="none" stroke="currentColor" stroke-width="1.6"/></svg>
+              <span data-i18n="backups">备份</span>
+            </button>
+            <button class="nav-item" data-view="settings">
+              <svg viewBox="0 0 24 24" width="17" height="17" class="ic"><circle cx="12" cy="12" r="3.2" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M12 3v2.5M12 18.5V21M3 12h2.5M18.5 12H21M5.6 5.6l1.8 1.8M16.6 16.6l1.8 1.8M18.4 5.6l-1.8 1.8M7.4 16.6l-1.8 1.8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+              <span data-i18n="settings">设置</span>
+            </button>
+          </nav>
+        </aside>
+
+        <main class="content" id="content">
+          <div class="view" id="view-profiles">
+            <section class="profile-head">
+              <div class="head-info">
+                <div class="head-title-row">
+                  <h1 id="profileName">开发环境</h1>
+                  <span class="badge badge-active" id="activeBadge">当前</span>
+                </div>
+                <p class="head-sub" id="profileMeta">6 条启用 · 2 条停用</p>
+              </div>
+              <div class="head-actions">
+                <button class="btn btn-ghost" id="editProfileBtn">
+                  <svg viewBox="0 0 24 24" width="15" height="15" class="ic"><path d="M4 20l1-4L16.5 4.5a2.1 2.1 0 0 1 3 3L8 19l-4 1z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/></svg>
+                  <span data-i18n="edit">编辑</span>
+                </button>
+                <button class="btn btn-ghost" id="duplicateProfileBtn">
+                  <svg viewBox="0 0 24 24" width="15" height="15" class="ic"><rect x="8" y="8" width="12" height="12" rx="2.5" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M5 16V6a2 2 0 0 1 2-2h9" fill="none" stroke="currentColor" stroke-width="1.6"/></svg>
+                  <span data-i18n="duplicate">复制</span>
+                </button>
+              </div>
+            </section>
+
+            <div class="list-toolbar">
+              <div class="search-wrap search-inline">
+                <svg viewBox="0 0 24 24" width="15" height="15" class="search-ic"><circle cx="11" cy="11" r="6.5" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M16 16l4 4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+                <input type="text" id="entrySearch" class="search-input" data-i18n-ph="searchEntry" placeholder="搜索主机名或 IP" autocomplete="off">
+              </div>
+              <div class="list-actions">
+                <button class="btn btn-ghost" id="sortBtn" title="Sort">
+                  <svg viewBox="0 0 24 24" width="15" height="15" class="ic"><path d="M7 4v14m0 0l-3-3m3 3l3-3M17 20V6m0 0l-3 3m3-3l3 3" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                  <span data-i18n="sort">排序</span>
+                </button>
+                <button class="btn btn-ghost" id="importBtn" title="Import">
+                  <svg viewBox="0 0 24 24" width="15" height="15" class="ic"><path d="M12 16V4m0 0L8 8m4-4l4 4M5 14v4a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-4" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                  <span data-i18n="import">导入</span>
+                </button>
+                <button class="btn btn-primary" id="addEntryBtn">
+                  <svg viewBox="0 0 24 24" width="15" height="15" class="ic"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+                  <span data-i18n="addEntry">新增条目</span>
+                </button>
+              </div>
+            </div>
+
+            <div class="entry-table glass" id="entryTable">
+              <div class="table-head">
+                <span class="col-state" data-i18n="colState">状态</span>
+                <span class="col-ip" data-i18n="colIP">IP 地址</span>
+                <span class="col-host" data-i18n="colHost">主机名</span>
+                <span class="col-desc" data-i18n="colDesc">描述</span>
+                <span class="col-actions"></span>
+              </div>
+              <div class="table-body" id="entryRows"></div>
+              <div class="empty-state" id="emptyProfile" hidden>
+                <div class="empty-icon">
+                  <svg viewBox="0 0 24 24" width="26" height="26"><path d="M4 7h16M4 12h10M4 17h8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+                </div>
+                <p data-i18n="emptyProfile">此配置暂无条目</p>
+                <p class="empty-hint" data-i18n="emptyProfileHint">点击“新增条目”开始添加</p>
+              </div>
+              <div class="empty-state" id="emptySearch" hidden>
+                <div class="empty-icon">
+                  <svg viewBox="0 0 24 24" width="26" height="26"><circle cx="11" cy="11" r="6.5" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M16 16l4 4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+                </div>
+                <p data-i18n="emptySearch">没有匹配的条目</p>
+                <p class="empty-hint" data-i18n="emptySearchHint">换个关键词试试</p>
+              </div>
+            </div>
+
+            <div class="entry-editor glass" id="sourceView" hidden>
+              <div class="editor-toolbar">
+                <span class="editor-title" data-i18n="sourcePreview">/etc/hosts 预览</span>
+                <div class="editor-actions">
+                  <button class="btn btn-ghost" id="commentBtn" data-i18n="comment">注释</button>
+                  <button class="btn btn-ghost" id="uncommentBtn" data-i18n="uncomment">取消注释</button>
+                </div>
+              </div>
+              <textarea id="sourceArea" class="source-area" spellcheck="false"></textarea>
+              <div class="editor-foot">
+                <span id="sourceMeta">0 条启用 · 0 条注释</span>
+                <span class="mono-hint" data-i18n="backupHint">写入前会自动备份当前 hosts 文件</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="view" id="view-backups" hidden>
+            <section class="page-head">
+              <h1 data-i18n="backupsTitle">备份</h1>
+              <p data-i18n="backupsSub">每次写入前自动生成时间戳备份，可预览并还原。</p>
+            </section>
+            <div class="backup-list" id="backupList"></div>
+          </div>
+
+          <div class="view" id="view-settings" hidden>
+            <section class="page-head">
+              <h1 data-i18n="settingsTitle">设置</h1>
+              <p data-i18n="settingsSub">管理默认行为、外观与备份策略。</p>
+            </section>
+            <div class="settings-group glass">
+              <div class="setting-row">
+                <div><div class="setting-name" data-i18n="defaultProfile">默认配置</div><div class="setting-desc" data-i18n="defaultProfileDesc">启动时选中的配置</div></div>
+                <select id="setDefaultProfile" class="select"></select>
+              </div>
+              <div class="setting-row">
+                <div><div class="setting-name" data-i18n="startup">启动行为</div><div class="setting-desc" data-i18n="startupDesc">打开 App 时的默认视图</div></div>
+                <select id="setStartupView" class="select"></select>
+              </div>
+              <div class="setting-row">
+                <div><div class="setting-name" data-i18n="retention">备份保留数量</div><div class="setting-desc" data-i18n="retentionDesc">超过数量后自动清理旧备份</div></div>
+                <div class="stepper">
+                  <button class="stepper-btn" data-step="-1">−</button>
+                  <span id="retentionVal">30</span>
+                  <button class="stepper-btn" data-step="1">+</button>
+                </div>
+              </div>
+              <div class="setting-row">
+                <div><div class="setting-name" data-i18n="lang">界面语言</div><div class="setting-desc" data-i18n="langDesc">中文 / English</div></div>
+                <div class="seg" id="langSeg">
+                  <button class="seg-btn active" data-lang="system" data-i18n="auto">自动</button>
+                  <button class="seg-btn" data-lang="zh">中文</button>
+                  <button class="seg-btn" data-lang="en">EN</button>
+                </div>
+              </div>
+              <div class="setting-row">
+                <div><div class="setting-name" data-i18n="appearance">外观</div><div class="setting-desc" data-i18n="appearanceDesc">亮色、暗色或跟随系统</div></div>
+                <div class="seg" id="themeSeg">
+                  <button class="seg-btn" data-theme="auto" data-i18n="auto">自动</button>
+                  <button class="seg-btn" data-theme="light" data-i18n="light">浅色</button>
+                  <button class="seg-btn active" data-theme="dark" data-i18n="dark">深色</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </main>
+      </div>
+    </div>
+
+    <div class="modal-backdrop" id="modalBackdrop" hidden>
+      <div class="modal glass" role="dialog" aria-modal="true">
+        <div class="modal-head">
+          <h2 id="modalTitle">应用配置</h2>
+          <button class="modal-close" id="modalClose">
+            <svg viewBox="0 0 24 24" width="16" height="16"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/></svg>
+          </button>
+        </div>
+        <div class="modal-body" id="modalBody"></div>
+        <div class="modal-foot" id="modalFoot"></div>
+      </div>
+    </div>
+
+    <div class="toast" id="toast" hidden></div>
+  </div>
+
+<script src="app.js"></script>
+</body>
+</html>
