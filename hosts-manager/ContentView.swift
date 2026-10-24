@@ -22,6 +22,21 @@ enum EntryMode: String, CaseIterable {
     case list, source
 }
 
+private extension View {
+    func zebraRowBackground(_ index: Int) -> some View {
+        let systemColors = NSColor.alternatingContentBackgroundColors
+        let color = systemColors.isEmpty
+            ? Color.clear
+            : Color(nsColor: systemColors[index % systemColors.count])
+        return listRowBackground(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(color)
+                .padding(.horizontal, 4)
+                .padding(.vertical, 1)
+        )
+    }
+}
+
 struct ProfileSidebarRow: View {
     @ObservedObject var profile: Profile
     let isSelected: Bool
@@ -1125,36 +1140,38 @@ struct SystemHostsView: View {
                     ContentUnavailableView(l10n.s("没有匹配的条目", "No matching entries"), systemImage: "magnifyingglass")
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
-                    List(filtered) { entry in
-                        HStack(spacing: 12) {
-                            Image(systemName: entry.isEnabled ? "circle.fill" : "circle")
-                                .font(.system(size: 9))
-                                .foregroundStyle(entry.isEnabled ? .green : .secondary)
-                            Text(entry.ip)
-                                .font(.system(.body, design: .monospaced))
-                                .frame(width: 140, alignment: .leading)
-                                .lineLimit(1)
-                            HStack(spacing: 5) {
-                                ForEach(entry.hostnames, id: \.self) { host in
-                                    Text(host)
-                                        .font(.system(.caption, design: .monospaced))
-                                        .padding(.horizontal, 8)
-                                        .padding(.vertical, 3)
-                                        .background(Capsule().fill(.thinMaterial))
-                                        .overlay(Capsule().stroke(.quaternary))
+                    List {
+                        ForEach(Array(filtered.enumerated()), id: \.element.id) { index, entry in
+                            HStack(spacing: 12) {
+                                Image(systemName: entry.isEnabled ? "circle.fill" : "circle")
+                                    .font(.system(size: 9))
+                                    .foregroundStyle(entry.isEnabled ? .green : .secondary)
+                                Text(entry.ip)
+                                    .font(.system(.body, design: .monospaced))
+                                    .frame(width: 140, alignment: .leading)
+                                    .lineLimit(1)
+                                HStack(spacing: 5) {
+                                    ForEach(entry.hostnames, id: \.self) { host in
+                                        Text(host)
+                                            .font(.system(.caption, design: .monospaced))
+                                            .padding(.horizontal, 8)
+                                            .padding(.vertical, 3)
+                                            .background(Capsule().fill(.thinMaterial))
+                                            .overlay(Capsule().stroke(.quaternary))
+                                    }
                                 }
+                                Spacer(minLength: 8)
+                                Text(localizedSeedDescription(entry.desc, isEnglish: l10n.isEnglish))
+                                    .font(.system(size: 12))
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(1)
                             }
-                            Spacer(minLength: 8)
-                            Text(localizedSeedDescription(entry.desc, isEnglish: l10n.isEnglish))
-                                .font(.system(size: 12))
-                                .foregroundStyle(.secondary)
-                                .lineLimit(1)
+                            .opacity(entry.isEnabled ? 1 : 0.6)
+                            .listRowSeparator(.hidden)
+                            .zebraRowBackground(index)
                         }
-                        .opacity(entry.isEnabled ? 1 : 0.6)
-                    .listRowSeparator(.hidden)
                     }
                     .listStyle(.inset)
-                .alternatingRowBackgrounds(.enabled)
                     .scrollContentBackground(.hidden)
                 }
             } else {
@@ -1290,7 +1307,7 @@ struct EntriesListView: View {
                             .id("new-entry-editor")
                             .listRowSeparator(.hidden)
                     }
-                    ForEach(filtered) { entry in
+                    ForEach(Array(filtered.enumerated()), id: \.element.id) { index, entry in
                         EntryRow(
                             entry: entry,
                             isEditing: editingID == entry.id,
@@ -1300,10 +1317,10 @@ struct EntriesListView: View {
                         )
                         .id(entry.id)
                         .listRowSeparator(.hidden)
+                        .zebraRowBackground(index)
                     }
                 }
                 .listStyle(.inset)
-                .alternatingRowBackgrounds(.enabled)
                 .scrollContentBackground(.hidden)
                 .background(.clear)
                 .onChange(of: isAdding) { _, adding in
@@ -2295,15 +2312,17 @@ struct BackupsView: View {
             if backups.isEmpty {
                 ContentUnavailableView(l10n.s("暂无备份", "No backups"), systemImage: "clock.arrow.circlepath")
             } else {
-                List(backups) { backup in
-                    BackupRow(
-                        backup: backup,
-                        onView: { previewBackup = backup },
-                        onDelete: { delete(backup) }
-                    )
+                List {
+                    ForEach(Array(backups.enumerated()), id: \.element.id) { index, backup in
+                        BackupRow(
+                            backup: backup,
+                            onView: { previewBackup = backup },
+                            onDelete: { delete(backup) }
+                        )
+                        .zebraRowBackground(index)
+                    }
                 }
                 .listStyle(.inset)
-                .alternatingRowBackgrounds(.enabled)
                 .scrollContentBackground(.hidden)
                 .background(.clear)
             }
@@ -2814,6 +2833,7 @@ struct ApplySheet: View {
     @EnvironmentObject private var l10n: Localization
     @State private var phase: Phase = .preview
     @State private var writeError: String?
+    @State private var baselineContent: String?
     @StateObject private var writeCoordinator = HostsWriteCoordinator.shared
 
     enum Phase { case preview, writing, done }
@@ -2829,6 +2849,9 @@ struct ApplySheet: View {
         .frame(width: 620, height: 500)
         .padding(22)
         .buttonBorderShape(.capsule)
+        .onAppear {
+            captureBaselineIfNeeded()
+        }
     }
 
     private var otherActiveProfiles: [Profile] {
@@ -2967,11 +2990,11 @@ struct ApplySheet: View {
     }
 
     private var diffView: some View {
-        let before = HostsParser.serialize(HostsParser.parse(HostsWriter.currentContent()))
+        let before = baselineContent ?? normalizedCurrentHosts()
         let after = target
         let diff = lineDiff(before, after)
         return VStack(alignment: .leading, spacing: 4) {
-            Text(l10n.s("预览", "Preview"))
+            Text(diffTitle)
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(.secondary)
             ScrollView {
@@ -2995,6 +3018,23 @@ struct ApplySheet: View {
             .padding(12)
             .frame(maxHeight: 220)
             .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(.ultraThinMaterial))
+        }
+    }
+
+    private var diffTitle: String {
+        guard phase == .done else { return l10n.s("预览", "Preview") }
+        return writeError == nil
+            ? l10n.s("已应用更改", "Applied changes")
+            : l10n.s("待应用更改", "Pending changes")
+    }
+
+    private func normalizedCurrentHosts() -> String {
+        HostsParser.serialize(HostsParser.parse(HostsWriter.currentContent()))
+    }
+
+    private func captureBaselineIfNeeded() {
+        if baselineContent == nil {
+            baselineContent = normalizedCurrentHosts()
         }
     }
 
@@ -3031,6 +3071,7 @@ struct ApplySheet: View {
 
     private func startWrite() {
         guard validationIssues.isEmpty, !writeCoordinator.isWriting else { return }
+        captureBaselineIfNeeded()
         phase = .writing
         Task {
             do {
