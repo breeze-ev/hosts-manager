@@ -279,7 +279,7 @@ struct ContentView: View {
             if let profileID = notification.object as? UUID {
                 sourceDrafts.removeValue(forKey: profileID)
                 // 列表视图是实时应用：条目一旦变动，立即把已启用配置的并集写回系统。
-                if let profile = profiles.first(where: { $0.id == profileID }), profile.isActive {
+                if let profile = profiles.first(where: { $0.id == profileID }), profile.isEnabled {
                     scheduleRealtimeApply(for: profile)
                 }
             }
@@ -704,20 +704,25 @@ struct ContentView: View {
     }
 
     private func applyActiveProfilesToSystem(after profile: Profile) {
-        guard !activeProfiles.isEmpty else { return }
+        guard profile.isEnabled else { return }
+        var targets = activeProfiles
+        if !targets.contains(where: { $0.id == profile.id }) {
+            targets.append(profile)
+        }
+        guard !targets.isEmpty else { return }
         if writeCoordinator.isWriting {
             // 有写入在进行时稍后重试，保证最后一次编辑也会落盘。
             scheduleRealtimeApply(for: profile)
             return
         }
-        if !validationIssues(for: activeProfiles).isEmpty {
+        if !validationIssues(for: targets).isEmpty {
             operationError = l10n.s(
                 "存在主机名冲突，未写入系统。",
                 "Conflicting hostnames were found; not written to the system."
             )
             return
         }
-        let content = mergedContent(for: activeProfiles)
+        let content = mergedContent(for: targets)
         Task {
             do {
                 let backupURL = try await writeCoordinator.write(content)
@@ -726,6 +731,10 @@ struct ContentView: View {
                     profileName: profile.localizedName(isEnglish: l10n.isEnglish),
                     note: l10n.s("列表编辑后实时应用", "Real-time apply after list edit")
                 )
+                profile.isActive = true
+                profile.isEnabled = true
+                profile.lastActivatedAt = Date()
+                profile.updatedAt = Date()
                 try context.save()
             } catch {
                 operationError = localizedError(error)
