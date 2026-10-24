@@ -18,5 +18,5 @@
 ## 说明
 
 - 本机 macOS 26 的 `iconutil` 对 iconset→icns 方向校验异常，因此 `.icns` 改由 Xcode 的 `actool` 编译产出（与系统 App 图标同构：16/32/128/1024 四种规格）。
-- `Assets.xcassets/AppIcon.appiconset` 未改动；如需让 App 直接使用新图标，把 `HostsManager.iconset/` 里的 PNG 覆盖进去即可。
+- `Assets.xcassets/AppIcon.appiconset` 已用 `HostsManager.iconset/` 里的 PNG 覆盖，App 会直接使用这套图标。
 - 如需在 Icon Composer.app 中编辑：用 Icon Composer 打开 `icon-abstract.svg`（或把 PNG/SVG 拖入新文档），再“另存为”Icon Composer 文档（`.icon`）。`.icon` 的内部包结构当前无公开样例可离线还原，故不在本目录预生成。

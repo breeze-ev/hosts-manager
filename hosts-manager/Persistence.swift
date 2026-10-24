@@ -104,6 +104,7 @@ final class PersistenceController: ObservableObject {
             profile.name = "默认"
             profile.isActive = true
             profile.isSystem = false
+            profile.lastActivatedAt = Date()
             profile.createdAt = Date()
             profile.updatedAt = Date()
         }
@@ -124,6 +125,11 @@ final class PersistenceController: ObservableObject {
                 let isSys = entry.hostList.contains { HostsParser.systemNames.contains($0.lowercased()) }
                 if entry.isSystem != isSys { entry.isSystem = isSys }
             }
+        }
+        // Backfill activation timestamps so older stores can still pick the
+        // most recently activated profile on launch.
+        for profile in all where profile.isActive && !profile.isSystem && profile.lastActivatedAt == nil {
+            profile.lastActivatedAt = profile.updatedAt ?? profile.createdAt
         }
         try context.save()
     }
@@ -147,14 +153,17 @@ final class PersistenceController: ObservableObject {
         profile.name = "默认"
         profile.isActive = true
         profile.isSystem = false
+        profile.lastActivatedAt = Date()
         profile.createdAt = Date()
         profile.updatedAt = Date()
 
         // Import the real non-system entries from /etc/hosts into the first custom profile.
         let userEntries = HostsParser.parse(HostsWriter.currentContent()).filter { !$0.isSystem }
         if userEntries.isEmpty {
-            addEntry(to: profile, ip: "127.0.0.1", hosts: ["api.dev.local"], desc: "本地 API 服务", enabled: true, system: false)
-            addEntry(to: profile, ip: "192.168.1.50", hosts: ["mysql.db.local"], desc: "开发数据库", enabled: true, system: false)
+            // Default entries are created disabled: they are not present in the
+            // system hosts file and must not be written until the user enables them.
+            addEntry(to: profile, ip: "127.0.0.1", hosts: ["api.dev.local"], desc: "Local API service", enabled: false, system: false)
+            addEntry(to: profile, ip: "192.168.1.50", hosts: ["mysql.db.local"], desc: "Development database", enabled: false, system: false)
         } else {
             for item in userEntries {
                 addEntry(to: profile, ip: item.ip, hosts: item.hostnames, desc: item.desc, enabled: item.isEnabled, system: false)
@@ -164,7 +173,6 @@ final class PersistenceController: ObservableObject {
         let settings = AppSettings(context: context)
         settings.id = UUID()
         settings.backupRetention = 30
-        settings.defaultProfileID = profile.id
         settings.defaultView = "list"
 
         try context.save()
@@ -195,7 +203,8 @@ final class PersistenceController: ObservableObject {
             attribute("isSystem", .booleanAttributeType, defaultValue: false),
             attribute("isEnabled", .booleanAttributeType, defaultValue: true),
             attribute("createdAt", .dateAttributeType),
-            attribute("updatedAt", .dateAttributeType)
+            attribute("updatedAt", .dateAttributeType),
+            attribute("lastActivatedAt", .dateAttributeType)
         ]
 
         let entry = entity("HostEntry", className: HostEntry.self)

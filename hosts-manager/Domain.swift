@@ -191,7 +191,7 @@ private extension URL {
 enum HostsWriteError: LocalizedError {
     case invalidContent(String)
     case authorizationFailed
-    case denied
+    case helperUnavailable
     case writeFailed
     case readFailed
     case verificationFailed
@@ -201,13 +201,13 @@ enum HostsWriteError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case let .invalidContent(message): return message
-        case .authorizationFailed: return "无法建立管理员授权"
-        case .denied: return "已取消或拒绝管理员授权"
-        case .writeFailed: return "写入 /etc/hosts 失败"
-        case .readFailed: return "无法读取 /etc/hosts"
-        case .verificationFailed: return "写入后校验失败"
-        case .timedOut: return "特权助手响应超时"
-        case .alreadyInProgress: return "已有写入任务正在进行"
+        case .authorizationFailed: return "Unable to establish administrator authorization."
+        case .helperUnavailable: return "The background writer helper is unavailable. Enable and approve it in Settings."
+        case .writeFailed: return "Failed to write /etc/hosts."
+        case .readFailed: return "Unable to read /etc/hosts."
+        case .verificationFailed: return "Verification failed after writing /etc/hosts."
+        case .timedOut: return "The background writer helper timed out."
+        case .alreadyInProgress: return "Another write is already in progress."
         }
     }
 }
@@ -228,8 +228,8 @@ enum HostsWriter {
     }
 
     /// Write the given content to /etc/hosts with elevated privileges.
-    /// Tries the privileged LaunchDaemon helper first (silent, app-attributed),
-    /// falling back to an `osascript` admin-password prompt when unavailable.
+    /// Writes through the privileged LaunchDaemon helper exclusively (silent,
+    /// app-attributed). No admin-password prompt is used.
     static func write(_ content: String) async throws {
         if let validationError = HostsValueValidator.validate(content: content) {
             throw HostsWriteError.invalidContent(validationError)
@@ -246,32 +246,9 @@ enum HostsWriter {
         case .unauthorized:
             throw HostsWriteError.authorizationFailed
         case .unavailable:
-            try writeViaOsascript(content)
+            throw HostsWriteError.helperUnavailable
         case .timedOut:
             throw HostsWriteError.timedOut
-        }
-    }
-
-    private static func writeViaOsascript(_ content: String) throws {
-        let temp = FileManager.default.temporaryDirectory.appendingPathComponent("hosts-\(UUID().uuidString).tmp")
-        try content.write(to: temp, atomically: true, encoding: .utf8)
-        defer { try? FileManager.default.removeItem(at: temp) }
-
-        let staged = "/etc/.hosts-manager-\(UUID().uuidString).tmp"
-        let quotedSource = "'\(temp.path.replacingOccurrences(of: "'", with: "'\\''"))'"
-        let quotedStaged = "'\(staged)'"
-        let command = "/usr/bin/install -m 644 -o root -g wheel \(quotedSource) \(quotedStaged) && /bin/mv -f \(quotedStaged) \(hostsPath)"
-        let escapedCommand = command.replacingOccurrences(of: "\"", with: "\\\"")
-        let script = "do shell script \"\(escapedCommand)\" with administrator privileges"
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
-        process.arguments = ["-e", script]
-        process.standardOutput = FileHandle.nullDevice
-        process.standardError = FileHandle.nullDevice
-        try process.run()
-        process.waitUntilExit()
-        guard process.terminationStatus == 0 else {
-            throw process.terminationStatus == -128 ? HostsWriteError.denied : HostsWriteError.writeFailed
         }
     }
 }

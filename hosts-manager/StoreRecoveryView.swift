@@ -40,6 +40,7 @@ struct StoreRecoveryView: View {
         }
         .padding(36)
         .frame(minWidth: 620, minHeight: 360)
+        .buttonBorderShape(.capsule)
         .confirmationDialog(
             l10n.s("重置数据库？", "Reset the profile store?"),
             isPresented: $showResetConfirmation,

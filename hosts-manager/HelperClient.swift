@@ -16,55 +16,99 @@ enum HostsHelperClient {
     static let serviceName = HostsHelperConstants.serviceName
     static let daemonPlistName = HostsHelperConstants.daemonPlistName
 
+    private static var daemon: SMAppService {
+        SMAppService.daemon(plistName: daemonPlistName)
+    }
+
+    static var status: SMAppService.Status {
+        daemon.status
+    }
+
     static var isRegistered: Bool {
-        SMAppService.daemon(plistName: daemonPlistName).status == .enabled
+        status == .enabled
     }
 
     static func statusLabel(isEnglish: Bool) -> String {
-        let status = SMAppService.daemon(plistName: daemonPlistName).status
         switch status {
         case .enabled:
-            return isEnglish ? "Enabled (silent writes)" : "已启用（静默写入）"
+            return isEnglish ? "Enabled" : "已启用"
         case .requiresApproval:
-            return isEnglish
-                ? "Waiting for approval in System Settings > General > Login Items & Extensions"
-                : "待批准：请在系统设置 → 通用 → 登录项与扩展中允许"
-        case .notRegistered:
-            return isEnglish ? "Not installed" : "未安装"
-        case .notFound:
-            return isEnglish ? "Helper is not embedded" : "未找到助手（助手未嵌入）"
+            return isEnglish ? "Not enabled (pending approval)" : "未启用（待批准）"
+        case .notRegistered, .notFound:
+            return isEnglish ? "Not enabled" : "未启用"
         @unknown default:
-            return isEnglish ? "Unknown status" : "未知状态"
+            return isEnglish ? "Not enabled" : "未启用"
         }
     }
 
-    static func install() -> String? {
-        let service = SMAppService.daemon(plistName: daemonPlistName)
+    static func openSystemSettingsLoginItems() {
+        SMAppService.openSystemSettingsLoginItems()
+    }
+
+    /// Enables the background write helper. When a previous registration is stuck
+    /// waiting for approval, clears it first: once the app is re-signed, calling
+    /// register() over the old registration fails with
+    /// SMAppServiceError.notPermitted ("Operation not permitted").
+    static func enable(isEnglish: Bool) -> String? {
+        let service = daemon
+        if service.status == .enabled {
+            return nil
+        }
+        if service.status == .requiresApproval {
+            try? service.unregister()
+        }
+        return register(service, isEnglish: isEnglish)
+    }
+
+    private static func register(_ service: SMAppService, isEnglish: Bool) -> String? {
         do {
             try service.register()
             return nil
         } catch {
-            return error.localizedDescription
-        }
-    }
-
-    static func repair() -> String? {
-        let service = SMAppService.daemon(plistName: daemonPlistName)
-        do {
-            if service.status == .enabled || service.status == .requiresApproval {
-                try service.unregister()
-            }
-            try service.register()
-            return nil
-        } catch {
-            return error.localizedDescription
+            return localizedRegistrationError(error, isEnglish: isEnglish)
         }
     }
 
     static func registerIfNeeded() {
-        let service = SMAppService.daemon(plistName: daemonPlistName)
-        guard service.status == .notRegistered || service.status == .requiresApproval else { return }
-        try? service.register()
+        guard status == .notRegistered || status == .requiresApproval else { return }
+        try? daemon.register()
+    }
+
+    private static func localizedRegistrationError(_ error: Error, isEnglish: Bool) -> String {
+        let nsError = error as NSError
+        let isSMError = nsError.domain == SMAppServiceErrorDomain
+        let description = nsError.localizedDescription
+        let deniedBySystem = isSMError
+            && (nsError.code == 2 || description.localizedCaseInsensitiveContains("Operation not permitted"))
+
+        if deniedBySystem {
+            return isEnglish
+                ? "The system denied the registration (Operation not permitted). Tap Enable Helper to clear the old entry, then allow it in System Settings > General > Login Items & Extensions."
+                : "系统拒绝了注册（Operation not permitted）。请点“启用助手”清理旧注册，再在“系统设置 → 通用 → 登录项与扩展”中允许本应用。"
+        }
+        if isSMError && nsError.code == 1 {
+            return isEnglish
+                ? "The app signature is invalid. The helper can only be installed by a properly signed build (use a Developer ID identity for release)."
+                : "应用签名无效，无法安装后台写入助手。请使用有效签名构建（正式发布请使用 Developer ID）。"
+        }
+        if isSMError && [3, 8, 9].contains(nsError.code) {
+            return isEnglish
+                ? "The helper or its launchd plist isn't embedded in the app bundle. Rebuild and run the latest build."
+                : "应用包内未找到助手或其配置，请重新构建并运行最新版本。"
+        }
+        if isSMError && nsError.code == 4 {
+            return isEnglish
+                ? "An entitlement required to install the helper is missing. Check the app's signing and capabilities."
+                : "缺少安装助手所需的授权（entitlement），请检查应用的签名与能力配置。"
+        }
+        if isSMError && [5, 10].contains(nsError.code) {
+            return isEnglish
+                ? "Helper registration failed. Tap Enable Helper to try again, or remove the old entry in System Settings first."
+                : "助手注册失败。请点击“启用助手”重试，或先在系统设置中移除旧注册。"
+        }
+        return isEnglish
+            ? "Registration failed: \(description)"
+            : "注册失败：\(description)"
     }
 
     static func write(_ content: String) async -> HostsHelperClientResult {

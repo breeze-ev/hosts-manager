@@ -27,30 +27,101 @@ struct ProfileSidebarRow: View {
     let isSelected: Bool
     let onSelect: () -> Void
     let onToggle: (Bool) -> Void
-    let onRename: () -> Void
+    let onEnableActive: () -> Void
+    let onDisableActive: () -> Void
     let onDelete: () -> Void
+    @Environment(\.managedObjectContext) private var context
     @EnvironmentObject private var l10n: Localization
     @State private var showDeleteConfirm = false
+    @State private var showDisableConfirm = false
+    @State private var isRenaming = false
+    @State private var draftName = ""
+    @State private var renameError: String?
+    @FocusState private var isNameFocused: Bool
 
     var body: some View {
         HStack(spacing: 6) {
-            Button {
-                onSelect()
-            } label: {
-                ProfileRow(profile: profile, isSelected: isSelected)
-            }
-            .buttonStyle(.plain)
-            .accessibilityIdentifier("profile-row-\(profile.name ?? "")")
+            if isRenaming {
+                ProfileAvatar(profile: profile)
+                VStack(alignment: .leading, spacing: 2) {
+                    TextField("", text: $draftName)
+                        .textFieldStyle(.roundedBorder)
+                        .controlSize(.small)
+                        .focused($isNameFocused)
+                        .onSubmit(saveRename)
+                        .onExitCommand(perform: cancelRename)
+                    if let renameError {
+                        Text(renameError)
+                            .font(.system(size: 10.5))
+                            .foregroundStyle(.red)
+                            .lineLimit(1)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
 
-            if !profile.isSystem {
-                Toggle("", isOn: Binding(
-                    get: { profile.isEnabled },
-                    set: { onToggle($0) }
-                ))
-                .toggleStyle(.switch)
-                .labelsHidden()
-                .controlSize(.mini)
-                .help(l10n.s("启用/停用", "Enable / Disable"))
+                Button {
+                    cancelRename()
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.borderless)
+                .help(l10n.s("取消", "Cancel"))
+
+                Button {
+                    saveRename()
+                } label: {
+                    Image(systemName: "checkmark")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(.green)
+                }
+                .buttonStyle(.borderless)
+                .disabled(draftName.trimmingCharacters(in: .whitespaces).isEmpty)
+                .help(l10n.s("保存", "Save"))
+            } else {
+                Button {
+                    onSelect()
+                } label: {
+                    ProfileRow(profile: profile, isSelected: isSelected)
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("profile-row-\(profile.name ?? "")")
+
+                if !profile.isSystem {
+                    Toggle("", isOn: Binding(
+                        get: { profile.isEnabled },
+                        set: { newValue in
+                            if !newValue && profile.isActive {
+                                showDisableConfirm = true
+                            } else if newValue && !profile.isActive {
+                                onEnableActive()
+                            } else {
+                                onToggle(newValue)
+                            }
+                        }
+                    ))
+                    .toggleStyle(.switch)
+                    .labelsHidden()
+                    .controlSize(.mini)
+                    .help(l10n.s("启用并写入系统，停用则移除", "Enable and write to system, disable removes it"))
+                    .popover(isPresented: $showDisableConfirm, arrowEdge: .bottom) {
+                        ConfirmPopover(
+                            title: l10n.s("停用当前配置？", "Disable the active profile?"),
+                            message: l10n.s(
+                                "当前配置会从 /etc/hosts 中移除，操作前会自动备份。",
+                                "The active profile will be removed from /etc/hosts. A backup is created first."
+                            ),
+                            cancelTitle: l10n.s("取消", "Cancel"),
+                            confirmTitle: l10n.s("停用并清除用户条目", "Disable and clear user entries"),
+                            onCancel: { showDisableConfirm = false },
+                            onConfirm: {
+                                showDisableConfirm = false
+                                onDisableActive()
+                            }
+                        )
+                    }
+                }
             }
         }
         .padding(.vertical, 5)
@@ -60,11 +131,11 @@ struct ProfileSidebarRow: View {
                 .fill(isSelected ? Color.accentColor.opacity(0.18) : .clear)
         )
         .contentShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
-        .opacity(profile.isEnabled ? 1 : 0.45)
+        .opacity(isRenaming ? 1 : (profile.isEnabled ? 1 : 0.45))
         .contextMenu {
             if !profile.isSystem {
                 Button(l10n.s("重命名", "Rename")) {
-                    onRename()
+                    beginRename()
                 }
                 Button(l10n.s("删除配置", "Delete Profile"), role: .destructive) {
                     showDeleteConfirm = true
@@ -72,7 +143,7 @@ struct ProfileSidebarRow: View {
             }
         }
         .popover(isPresented: $showDeleteConfirm, arrowEdge: .trailing) {
-            DeleteConfirmPopover(
+            ConfirmPopover(
                 title: l10n.s("删除此配置？", "Delete this profile?"),
                 message: l10n.s("此操作无法撤销。", "This action cannot be undone."),
                 cancelTitle: l10n.s("取消", "Cancel"),
@@ -83,6 +154,35 @@ struct ProfileSidebarRow: View {
                     onDelete()
                 }
             )
+        }
+    }
+
+    private func beginRename() {
+        draftName = profile.localizedName(isEnglish: l10n.isEnglish)
+        renameError = nil
+        isRenaming = true
+        isNameFocused = true
+    }
+
+    private func cancelRename() {
+        isRenaming = false
+        isNameFocused = false
+        renameError = nil
+    }
+
+    private func saveRename() {
+        let trimmed = draftName.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else {
+            renameError = l10n.s("配置名称不能为空。", "The profile name cannot be empty.")
+            return
+        }
+        profile.name = trimmed
+        profile.updatedAt = Date()
+        do {
+            try context.save()
+            cancelRename()
+        } catch {
+            renameError = error.localizedDescription
         }
     }
 }
@@ -102,11 +202,12 @@ struct ContentView: View {
     @State private var mode: EntryMode = .list
     @State private var didApplyDefaultMode = false
     @State private var showApply = false
-    @State private var renamingProfile: Profile?
     @State private var query = ""
     @State private var sourceDrafts: [UUID: String] = [:]
     @State private var operationError: String?
-    @State private var pendingDisable: Profile?
+    @State private var showHelperGuide = false
+    @State private var realtimeApplyTask: Task<Void, Never>?
+    @State private var pendingScrollProfileID: UUID?
     @StateObject private var writeCoordinator = HostsWriteCoordinator.shared
 
     private var selectedProfile: Profile? {
@@ -125,11 +226,12 @@ struct ContentView: View {
         .navigationTitle("Hosts Manager")
         .toolbar { toolbarContent }
         .toolbarBackground(.hidden, for: .windowToolbar)
+        .buttonBorderShape(.capsule)
         .sheet(isPresented: $showApply) {
             if let profile = selectedProfile { ApplySheet(profile: profile) }
         }
-        .sheet(item: $renamingProfile) { profile in
-            ProfileRenameSheet(profile: profile)
+        .sheet(isPresented: $showHelperGuide) {
+            HelperGuideSheet(onClose: { showHelperGuide = false })
         }
         .alert(
             l10n.s("操作失败", "Operation Failed"),
@@ -142,26 +244,6 @@ struct ContentView: View {
         } message: {
             Text(operationError ?? "")
         }
-        .confirmationDialog(
-            l10n.s("停用当前配置？", "Disable the active profile?"),
-            isPresented: Binding(
-                get: { pendingDisable != nil },
-                set: { if !$0 { pendingDisable = nil } }
-            ),
-            titleVisibility: .visible
-        ) {
-            Button(l10n.s("停用并清除用户条目", "Disable and clear user entries"), role: .destructive) {
-                disableActiveProfile()
-            }
-            Button(l10n.s("取消", "Cancel"), role: .cancel) {
-                pendingDisable = nil
-            }
-        } message: {
-            Text(l10n.s(
-                "当前配置会从 /etc/hosts 中移除，操作前会自动备份。",
-                "The active profile will be removed from /etc/hosts. A backup is created first."
-            ))
-        }
         .onAppear {
             if !didApplyDefaultMode {
                 if let stored = (try? context.fetch(AppSettings.fetchRequest()))?.first?.defaultView {
@@ -172,7 +254,15 @@ struct ContentView: View {
             if selectedProfileID == nil {
                 selectedProfileID = initialProfileID()
             }
+            if !HostsHelperClient.isRegistered {
+                showHelperGuide = true
+            }
             applyAppearance()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            if HostsHelperClient.isRegistered {
+                showHelperGuide = false
+            }
         }
         .onReceive(NotificationCenter.default.publisher(for: .openSettings)) { _ in
             selection = .settings
@@ -188,6 +278,10 @@ struct ContentView: View {
         .onReceive(NotificationCenter.default.publisher(for: .profileEntriesChanged)) { notification in
             if let profileID = notification.object as? UUID {
                 sourceDrafts.removeValue(forKey: profileID)
+                // 列表视图是实时应用：条目一旦变动，立即把已启用配置的并集写回系统。
+                if let profile = profiles.first(where: { $0.id == profileID }), profile.isActive {
+                    scheduleRealtimeApply(for: profile)
+                }
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .defaultEntryModeChanged)) { notification in
@@ -201,79 +295,105 @@ struct ContentView: View {
     }
 
     private var sidebar: some View {
-        VStack(spacing: 0) {
+        ScrollViewReader { proxy in
             List {
-                Section(l10n.s("配置", "Profiles")) {
-                    ForEach(profiles) { profile in
-                        ProfileSidebarRow(
-                            profile: profile,
-                            isSelected: selection == .profiles && selectedProfile?.id == profile.id,
-                            onSelect: {
-                                selection = .profiles
-                                selectedProfileID = profile.id
-                            },
-                            onToggle: { newValue in
-                                setProfileEnabled(profile, enabled: newValue)
-                            },
-                            onRename: {
-                                renamingProfile = profile
-                            },
-                            onDelete: {
-                                deleteProfile(profile)
-                            }
-                        )
-                    }
-                    Button {
-                        createProfile()
-                    } label: {
-                        Label(l10n.s("新建配置", "New Profile"), systemImage: "plus")
-                    }
-                    .buttonStyle(.borderless)
+                ForEach(profiles) { profile in
+                    ProfileSidebarRow(
+                        profile: profile,
+                        isSelected: selection == .profiles && selectedProfile?.id == profile.id,
+                        onSelect: {
+                            selection = .profiles
+                            selectedProfileID = profile.id
+                        },
+                        onToggle: { newValue in
+                            setProfileEnabled(profile, enabled: newValue)
+                        },
+                        onEnableActive: {
+                            enableProfile(profile)
+                        },
+                        onDisableActive: {
+                            disableActiveProfile(profile)
+                        },
+                        onDelete: {
+                            deleteProfile(profile)
+                        }
+                    )
+                    .id(profile.id)
                 }
             }
             .listStyle(.sidebar)
             .scrollContentBackground(.hidden)
-
-            Rectangle()
-                .fill(.separator)
-                .frame(height: 1)
-                .padding(.horizontal, 18)
-
-            HStack(spacing: 8) {
-                Button {
-                    selection = .backups
-                } label: {
-                    Image(systemName: "clock.arrow.circlepath")
-                        .font(.system(size: 18))
-                        .foregroundStyle(selection == .backups ? Color.accentColor : Color.secondary)
-                        .frame(maxWidth: .infinity, minHeight: 30)
-                        .contentShape(Rectangle())
-                        .background(
-                            RoundedRectangle(cornerRadius: 9, style: .continuous)
-                                .fill(selection == .backups ? Color.accentColor.opacity(0.18) : .clear)
-                        )
+            .scrollEdgeEffectStyle(.soft, for: .all)
+            .safeAreaBar(edge: .top, alignment: .leading, spacing: 0) {
+                HStack(spacing: 6) {
+                    Text(l10n.s("配置", "Profiles"))
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Button {
+                        createProfile()
+                    } label: {
+                        Image(systemName: "plus")
+                            .font(.system(size: 14, weight: .semibold))
+                            .frame(width: 24, height: 24)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.borderless)
+                    .accessibilityIdentifier("create-profile-button")
+                    .accessibilityLabel(l10n.s("新建配置", "New Profile"))
+                    .help(l10n.s("新建配置", "New Profile"))
                 }
-                .buttonStyle(.borderless)
-                .help(l10n.s("备份", "Backups"))
-
-                Button {
-                    selection = .settings
-                } label: {
-                    Image(systemName: "gearshape")
-                        .font(.system(size: 18))
-                        .foregroundStyle(selection == .settings ? Color.accentColor : Color.secondary)
-                        .frame(maxWidth: .infinity, minHeight: 30)
-                        .contentShape(Rectangle())
-                        .background(
-                            RoundedRectangle(cornerRadius: 9, style: .continuous)
-                                .fill(selection == .settings ? Color.accentColor.opacity(0.18) : .clear)
-                        )
-                }
-                .buttonStyle(.borderless)
-                .help(l10n.s("设置", "Settings"))
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .frame(maxWidth: .infinity)
             }
-            .padding(.vertical, 8)
-            .padding(.horizontal, 12)
+            .safeAreaBar(edge: .bottom, alignment: .center, spacing: 0) {
+                HStack(spacing: 8) {
+                    Button {
+                        selection = .backups
+                    } label: {
+                        Image(systemName: "clock.arrow.circlepath")
+                            .font(.system(size: 18))
+                            .foregroundStyle(selection == .backups ? Color.accentColor : Color.secondary)
+                            .frame(maxWidth: .infinity, minHeight: 30)
+                            .contentShape(Rectangle())
+                            .background(
+                                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                                    .fill(selection == .backups ? Color.accentColor.opacity(0.18) : .clear)
+                            )
+                    }
+                    .buttonStyle(.borderless)
+                    .help(l10n.s("备份", "Backups"))
+
+                    Button {
+                        selection = .settings
+                    } label: {
+                        Image(systemName: "gearshape")
+                            .font(.system(size: 18))
+                            .foregroundStyle(selection == .settings ? Color.accentColor : Color.secondary)
+                            .frame(maxWidth: .infinity, minHeight: 30)
+                            .contentShape(Rectangle())
+                            .background(
+                                RoundedRectangle(cornerRadius: 9, style: .continuous)
+                                    .fill(selection == .settings ? Color.accentColor.opacity(0.18) : .clear)
+                            )
+                    }
+                    .buttonStyle(.borderless)
+                    .help(l10n.s("设置", "Settings"))
+                }
+                .padding(.vertical, 8)
+                .padding(.horizontal, 12)
+            }
+            .onChange(of: profiles.map(\.id)) { _, newIDs in
+                if let targetID = pendingScrollProfileID, newIDs.contains(targetID) {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
+                        withAnimation(.easeInOut(duration: 0.35)) {
+                            proxy.scrollTo(targetID, anchor: .top)
+                        }
+                        pendingScrollProfileID = nil
+                    }
+                }
+            }
         }
     }
 
@@ -287,7 +407,8 @@ struct ContentView: View {
                     mode: $mode,
                     query: $query,
                     sourceText: sourceBinding(for: profile),
-                    isSourceDirty: profile.id.map { sourceDrafts[$0] != nil } ?? false
+                    isSourceDirty: profile.id.map { sourceDrafts[$0] != nil } ?? false,
+                    onApply: { applyProfile(profile) }
                 )
                     .id(profile.id)
             } else {
@@ -341,20 +462,6 @@ struct ContentView: View {
                         .frame(width: 30, height: 30)
                 }
                 .accessibilityLabel(l10n.s("导入、复制或导出配置", "Import, duplicate, or export profile"))
-
-                Button {
-                    requestApply()
-                } label: {
-                    Label(l10n.s("应用", "Apply"), systemImage: "checkmark.circle")
-                }
-                .buttonStyle(.glassProminent)
-                .accessibilityIdentifier("apply-profile-button")
-                .disabled(
-                    selectedProfile == nil ||
-                        selectedProfile?.isSystem == true ||
-                        selectedProfile?.isEnabled == false ||
-                        writeCoordinator.isWriting
-                )
             }
         }
     }
@@ -375,6 +482,7 @@ struct ContentView: View {
         }
         selectedProfileID = profile.id
         selection = .profiles
+        pendingScrollProfileID = profile.id
     }
 
     private func deleteProfile(_ profile: Profile) {
@@ -384,13 +492,6 @@ struct ContentView: View {
                 "Disable the active profile before deleting it."
             )
             return
-        }
-        if let deletedID = profile.id,
-           let settings = (try? context.fetch(AppSettings.fetchRequest()))?.first,
-           settings.defaultProfileID == deletedID {
-            settings.defaultProfileID = profiles.first {
-                $0 !== profile && !$0.isSystem
-            }?.id
         }
         context.delete(profile)
         do {
@@ -408,8 +509,8 @@ struct ContentView: View {
     }
 
     @discardableResult
-    private func saveSourceIfNeeded() -> Bool {
-        guard mode == .source, let profile = selectedProfile, !profile.isSystem else {
+    private func saveSourceIfNeeded(for target: Profile? = nil) -> Bool {
+        guard mode == .source, let profile = target ?? selectedProfile, !profile.isSystem else {
             return true
         }
         let draft = sourceText(for: profile)
@@ -462,20 +563,102 @@ struct ContentView: View {
     }
 
     private func requestApply() {
-        guard selection == .profiles,
-              let profile = selectedProfile,
-              !profile.isSystem,
-              profile.isEnabled,
-              !writeCoordinator.isWriting else {
+        // 应用操作只属于编辑视图，列表视图里没有应用入口。
+        guard mode == .source, selection == .profiles, let profile = selectedProfile else { return }
+        applyProfile(profile)
+    }
+
+    private func parsedEntries(for profile: Profile) -> [ParsedHostEntry] {
+        profile.sortedEntries.map {
+            ParsedHostEntry(
+                ip: $0.ip ?? "",
+                hostnames: $0.hostList,
+                desc: localizedSeedDescription($0.desc, isEnglish: l10n.isEnglish),
+                isEnabled: $0.isEnabled,
+                isSystem: $0.isSystem
+            )
+        }
+    }
+
+    private var activeProfiles: [Profile] {
+        profiles.filter { $0.isActive && !$0.isSystem }
+    }
+
+    private func mergedContent(for profiles: [Profile]) -> String {
+        HostsParser.mergedContent(entries: profiles.flatMap(parsedEntries(for:)))
+    }
+
+    private func validationIssues(for profiles: [Profile]) -> [HostIssue] {
+        HostValidator.issues(entries: profiles.flatMap(parsedEntries(for:)).filter(\.isEnabled))
+    }
+
+    // 配置开关 = 系统内容总开关：打开立即把该配置已启用的条目并入 /etc/hosts，
+    // 关闭则只移除该配置。可同时启用多条配置，写入内容是它们已启用条目的并集。
+    // 应用（Apply）是带预览和冲突检查的重新同步入口。
+    private func enableProfile(_ profile: Profile) {
+        guard !profile.isSystem, !writeCoordinator.isWriting else { return }
+        guard saveSourceIfNeeded(for: profile) else { return }
+
+        let others = activeProfiles.filter { $0.id != profile.id }
+        let targetProfiles = others + [profile]
+
+        // 打开开关同样遵守冲突检查：与其它已启用配置存在冲突/重复时转入“应用”预览，
+        // 让用户先处理，而不是把有冲突的内容静默写入系统。
+        if !validationIssues(for: targetProfiles).isEmpty {
+            profile.isEnabled = true
+            profile.updatedAt = Date()
+            do {
+                try context.save()
+            } catch {
+                operationError = localizedError(error)
+                return
+            }
+            selection = .profiles
+            selectedProfileID = profile.id
+            showApply = true
             return
         }
-        guard saveSourceIfNeeded() else { return }
+
+        profile.isEnabled = true
+        profile.updatedAt = Date()
+        do {
+            try context.save()
+        } catch {
+            operationError = localizedError(error)
+            return
+        }
+        let content = mergedContent(for: targetProfiles)
+        Task {
+            do {
+                let backupURL = try await writeCoordinator.write(content)
+                recordBackup(
+                    at: backupURL,
+                    profileName: profile.localizedName(isEnglish: l10n.isEnglish),
+                    note: l10n.s("启用配置前自动备份", "Auto backup before enabling profile")
+                )
+                profile.isActive = true
+                profile.isEnabled = true
+                profile.lastActivatedAt = Date()
+                profile.updatedAt = Date()
+                try context.save()
+            } catch {
+                operationError = localizedError(error)
+            }
+        }
+    }
+
+    @discardableResult
+    private func applyProfile(_ profile: Profile) -> Bool {
+        guard !profile.isSystem, profile.isEnabled, !writeCoordinator.isWriting else { return false }
+        guard saveSourceIfNeeded(for: profile) else { return false }
+        selection = .profiles
+        selectedProfileID = profile.id
         showApply = true
+        return true
     }
 
     private func setProfileEnabled(_ profile: Profile, enabled: Bool) {
         if !enabled && profile.isActive {
-            pendingDisable = profile
             return
         }
         profile.isEnabled = enabled
@@ -487,16 +670,16 @@ struct ContentView: View {
         }
     }
 
-    private func disableActiveProfile() {
-        guard let profile = pendingDisable else { return }
-        pendingDisable = nil
-        let content = HostsParser.mergedContent(entries: [])
+    private func disableActiveProfile(_ profile: Profile) {
+        // 只移除该配置，其它已启用配置的内容继续保留在系统里。
+        let remaining = activeProfiles.filter { $0.id != profile.id }
+        let content = mergedContent(for: remaining)
         Task {
             do {
                 let backupURL = try await writeCoordinator.write(content)
                 recordBackup(
                     at: backupURL,
-                    profileName: profile.name,
+                    profileName: profile.localizedName(isEnglish: l10n.isEnglish),
                     note: l10n.s("停用当前配置前自动备份", "Auto backup before disabling the active profile")
                 )
                 profile.isActive = false
@@ -509,19 +692,52 @@ struct ContentView: View {
         }
     }
 
+    /// 列表视图实时应用：条目变动后把已启用配置的并集立即写回 /etc/hosts。
+    /// 用短暂防抖合并连续操作，避免频繁触发特权写入。
+    private func scheduleRealtimeApply(for profile: Profile) {
+        realtimeApplyTask?.cancel()
+        realtimeApplyTask = Task {
+            try? await Task.sleep(for: .milliseconds(250))
+            guard !Task.isCancelled else { return }
+            applyActiveProfilesToSystem(after: profile)
+        }
+    }
+
+    private func applyActiveProfilesToSystem(after profile: Profile) {
+        guard !activeProfiles.isEmpty else { return }
+        if writeCoordinator.isWriting {
+            // 有写入在进行时稍后重试，保证最后一次编辑也会落盘。
+            scheduleRealtimeApply(for: profile)
+            return
+        }
+        if !validationIssues(for: activeProfiles).isEmpty {
+            operationError = l10n.s(
+                "存在主机名冲突，未写入系统。",
+                "Conflicting hostnames were found; not written to the system."
+            )
+            return
+        }
+        let content = mergedContent(for: activeProfiles)
+        Task {
+            do {
+                let backupURL = try await writeCoordinator.write(content)
+                recordBackup(
+                    at: backupURL,
+                    profileName: profile.localizedName(isEnglish: l10n.isEnglish),
+                    note: l10n.s("列表编辑后实时应用", "Real-time apply after list edit")
+                )
+                try context.save()
+            } catch {
+                operationError = localizedError(error)
+            }
+        }
+    }
+
     private func sourceText(for profile: Profile) -> String {
         if let profileID = profile.id, let draft = sourceDrafts[profileID] {
             return draft
         }
-        return HostsParser.serialize(profile.sortedEntries.map {
-            ParsedHostEntry(
-                ip: $0.ip ?? "",
-                hostnames: $0.hostList,
-                desc: $0.desc ?? "",
-                isEnabled: $0.isEnabled,
-                isSystem: $0.isSystem
-            )
-        })
+        return localizedSourceText(for: profile, isEnglish: l10n.isEnglish)
     }
 
     private func sourceBinding(for profile: Profile) -> Binding<String> {
@@ -536,10 +752,12 @@ struct ContentView: View {
     }
 
     private func initialProfileID() -> UUID? {
-        let settings = try? context.fetch(AppSettings.fetchRequest())
-        if let defaultID = settings?.first?.defaultProfileID,
-           profiles.contains(where: { $0.id == defaultID }) {
-            return defaultID
+        let candidates = profiles.filter { !$0.isSystem }
+        if let last = candidates.max(by: {
+            ($0.lastActivatedAt ?? $0.updatedAt ?? $0.createdAt ?? .distantPast)
+                < ($1.lastActivatedAt ?? $1.updatedAt ?? $1.createdAt ?? .distantPast)
+        }) {
+            return last.id
         }
         return selectedProfile?.id
     }
@@ -573,7 +791,8 @@ struct ContentView: View {
         guard let source = selectedProfile, !source.isSystem else { return }
         let profile = Profile(context: context)
         profile.id = UUID()
-        profile.name = l10n.s("\(source.name ?? "") 副本", "\(source.name ?? "") Copy")
+        let sourceName = source.localizedName(isEnglish: l10n.isEnglish)
+        profile.name = l10n.s("\(sourceName) 副本", "\(sourceName) Copy")
         profile.isActive = false
         profile.isEnabled = source.isEnabled
         profile.createdAt = Date()
@@ -600,7 +819,7 @@ struct ContentView: View {
         guard let profile = selectedProfile, !profile.isSystem else { return }
         let panel = NSSavePanel()
         panel.allowedContentTypes = [.plainText]
-        panel.nameFieldStringValue = "\(profile.name ?? "hosts").hosts"
+        panel.nameFieldStringValue = "\(profile.localizedName(isEnglish: l10n.isEnglish)).hosts"
         guard panel.runModal() == .OK, let url = panel.url else { return }
         do {
             try sourceText(for: profile).write(to: url, atomically: true, encoding: .utf8)
@@ -648,9 +867,12 @@ struct ContentView: View {
                     "The content contains an invalid IP address, hostname, or control character."
                 )
             case .authorizationFailed:
-                return l10n.s("无法通过特权助手授权。", "The privileged helper rejected the request.")
-            case .denied:
-                return l10n.s("已取消管理员授权。", "Administrator authorization was cancelled.")
+                return l10n.s("无法通过后台写入助手授权。", "The background writer helper rejected the request.")
+            case .helperUnavailable:
+                return l10n.s(
+                    "后台写入助手不可用。请在设置中启用，并在“系统设置 → 通用 → 登录项与扩展”中批准后重试。",
+                    "The background writer helper is unavailable. Enable it in Settings and approve it in System Settings > General > Login Items & Extensions."
+                )
             case .writeFailed:
                 return l10n.s("写入 /etc/hosts 失败。", "Failed to write /etc/hosts.")
             case .readFailed:
@@ -658,7 +880,7 @@ struct ContentView: View {
             case .verificationFailed:
                 return l10n.s("写入后校验失败，请检查 hosts 文件。", "Verification failed after writing /etc/hosts.")
             case .timedOut:
-                return l10n.s("特权助手响应超时。", "The privileged helper timed out.")
+                return l10n.s("后台写入助手响应超时。", "The background writer helper timed out.")
             case .alreadyInProgress:
                 return l10n.s("已有写入任务正在进行。", "Another write is already in progress.")
             }
@@ -698,23 +920,10 @@ struct ProfileRow: View {
 
     var body: some View {
         HStack(spacing: 10) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 9, style: .continuous)
-                    .fill(LinearGradient(
-                        colors: ProfilePalette.colors(
-                            for: profile.id?.uuidString ?? profile.name ?? ""
-                        ),
-                        startPoint: .top,
-                        endPoint: .bottom
-                    ))
-                Text(initial)
-                    .font(.system(size: 14, weight: .bold))
-                    .foregroundStyle(.white)
-            }
-            .frame(width: 32, height: 32)
+            ProfileAvatar(profile: profile)
 
             VStack(alignment: .leading, spacing: 2) {
-                Text(profile.name ?? "")
+                Text(profile.localizedName(isEnglish: l10n.isEnglish))
                     .font(.system(size: 13.5, weight: .semibold))
                     .lineLimit(1)
                 Text(meta)
@@ -727,12 +936,34 @@ struct ProfileRow: View {
         .contentShape(Rectangle())
     }
 
-    private var initial: String { String((profile.name ?? "?").prefix(1)) }
     private var meta: String {
         if profile.isSystem { return l10n.s("系统只读", "System") }
         if !profile.isEnabled { return l10n.s("已停用", "Disabled") }
         let on = profile.sortedEntries.filter(\.isEnabled).count
-        return l10n.s("\(on) 条启用", "\(on) enabled")
+        if !profile.isActive { return l10n.s("未应用 · \(on) 条启用", "Not applied · \(on) enabled") }
+        return l10n.s("已应用 · \(on) 条启用", "Applied · \(on) enabled")
+    }
+}
+
+struct ProfileAvatar: View {
+    @ObservedObject var profile: Profile
+    @EnvironmentObject private var l10n: Localization
+
+    var body: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 9, style: .continuous)
+                .fill(LinearGradient(
+                    colors: ProfilePalette.colors(
+                        for: profile.id?.uuidString ?? profile.localizedName(isEnglish: l10n.isEnglish)
+                    ),
+                    startPoint: .top,
+                    endPoint: .bottom
+                ))
+            Text(String(profile.localizedName(isEnglish: l10n.isEnglish).prefix(1)))
+                .font(.system(size: 14, weight: .bold))
+                .foregroundStyle(.white)
+        }
+        .frame(width: 32, height: 32)
     }
 }
 
@@ -744,6 +975,7 @@ struct ProfileDetailView: View {
     @Binding var query: String
     @Binding var sourceText: String
     let isSourceDirty: Bool
+    let onApply: () -> Void
     @Environment(\.managedObjectContext) private var context
     @EnvironmentObject private var l10n: Localization
     @State private var isAdding = false
@@ -756,22 +988,24 @@ struct ProfileDetailView: View {
             } else if mode == .list {
                 EntriesListView(profile: profile, query: query, isAdding: $isAdding)
             } else {
-                SourceEditorView(profile: profile, text: $sourceText, isDirty: isSourceDirty)
+                SourceEditorView(
+                    profile: profile,
+                    text: $sourceText,
+                    isDirty: isSourceDirty,
+                    onApply: onApply,
+                    toolbarQuery: query
+                )
             }
         }
         .padding(22)
         .onAppear {
             if sourceText.isEmpty {
-                sourceText = HostsParser.serialize(profile.sortedEntries.map {
-                    ParsedHostEntry(ip: $0.ip ?? "", hostnames: $0.hostList, desc: $0.desc ?? "", isEnabled: $0.isEnabled, isSystem: $0.isSystem)
-                })
+                sourceText = localizedSourceText(for: profile, isEnglish: l10n.isEnglish)
             }
         }
         .onChange(of: mode) { _, newMode in
             if newMode == .source && sourceText.isEmpty {
-                sourceText = HostsParser.serialize(profile.sortedEntries.map {
-                    ParsedHostEntry(ip: $0.ip ?? "", hostnames: $0.hostList, desc: $0.desc ?? "", isEnabled: $0.isEnabled, isSystem: $0.isSystem)
-                })
+                sourceText = localizedSourceText(for: profile, isEnglish: l10n.isEnglish)
             }
         }
     }
@@ -780,7 +1014,7 @@ struct ProfileDetailView: View {
         HStack(alignment: .center) {
             VStack(alignment: .leading, spacing: 6) {
                 HStack(spacing: 10) {
-                    Text(profile.name ?? "")
+                    Text(profile.localizedName(isEnglish: l10n.isEnglish))
                         .font(.system(size: 27, weight: .bold))
                     badge
                 }
@@ -792,7 +1026,7 @@ struct ProfileDetailView: View {
             if !profile.isSystem && mode == .list {
                 HStack(spacing: 8) {
                     Button(l10n.s("添加", "Add"), systemImage: "plus") {
-                        withAnimation { isAdding = true }
+                        isAdding = true
                     }
                     .buttonStyle(.glass)
                     .frame(minWidth: 64)
@@ -844,59 +1078,6 @@ struct ProfileDetailView: View {
 
 }
 
-// MARK: - Profile rename
-
-struct ProfileRenameSheet: View {
-    @ObservedObject var profile: Profile
-    @Environment(\.managedObjectContext) private var context
-    @Environment(\.dismiss) private var dismiss
-    @EnvironmentObject private var l10n: Localization
-    @State private var name: String
-    @State private var error: String?
-
-    init(profile: Profile) {
-        self.profile = profile
-        _name = State(initialValue: profile.name ?? "")
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text(l10n.s("重命名配置", "Rename Profile"))
-                .font(.system(size: 18, weight: .bold))
-            TextField(l10n.s("配置名称", "Profile name"), text: $name)
-                .textFieldStyle(.roundedBorder)
-            if let error {
-                Text(error)
-                    .font(.system(size: 12))
-                    .foregroundStyle(.red)
-            }
-            HStack {
-                Spacer()
-                Button(l10n.s("取消", "Cancel")) { dismiss() }.buttonStyle(.glass)
-                Button(l10n.s("保存", "Save")) { save() }.buttonStyle(.glassProminent)
-            }
-        }
-        .padding(22)
-        .frame(width: 380)
-    }
-
-    private func save() {
-        let trimmed = name.trimmingCharacters(in: .whitespaces)
-        guard !trimmed.isEmpty else {
-            error = l10n.s("配置名称不能为空。", "The profile name cannot be empty.")
-            return
-        }
-        profile.name = trimmed
-        profile.updatedAt = Date()
-        do {
-            try context.save()
-            dismiss()
-        } catch {
-            self.error = error.localizedDescription
-        }
-    }
-}
-
 // MARK: - System (read-only live view)
 
 struct SystemHostsView: View {
@@ -921,7 +1102,7 @@ struct SystemHostsView: View {
         return live.filter {
             $0.ip.lowercased().contains(q) ||
             $0.hostnames.joined(separator: " ").lowercased().contains(q) ||
-            $0.desc.lowercased().contains(q)
+            localizedSeedDescription($0.desc, isEnglish: l10n.isEnglish).lowercased().contains(q)
         }
     }
 
@@ -955,14 +1136,16 @@ struct SystemHostsView: View {
                                 }
                             }
                             Spacer(minLength: 8)
-                            Text(entry.desc)
+                            Text(localizedSeedDescription(entry.desc, isEnglish: l10n.isEnglish))
                                 .font(.system(size: 12))
                                 .foregroundStyle(.secondary)
                                 .lineLimit(1)
                         }
                         .opacity(entry.isEnabled ? 1 : 0.6)
+                    .listRowSeparator(.hidden)
                     }
                     .listStyle(.inset)
+                .alternatingRowBackgrounds(.enabled)
                     .scrollContentBackground(.hidden)
                 }
             } else {
@@ -970,9 +1153,7 @@ struct SystemHostsView: View {
                     Text(l10n.s("/etc/hosts（系统只读）", "/etc/hosts (system, read-only)"))
                         .font(.system(size: 12.5, weight: .semibold))
                         .foregroundStyle(.secondary)
-                    TextEditor(text: .constant(raw))
-                        .font(.system(.body, design: .monospaced))
-                        .scrollContentBackground(.hidden)
+                    ReadOnlyHostsTextView(content: raw, query: query)
                         .padding(12)
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                         .background(.ultraThinMaterial)
@@ -992,6 +1173,60 @@ struct SystemHostsView: View {
     }
 }
 
+struct ReadOnlyHostsTextView: NSViewRepresentable {
+    let content: String
+    let query: String
+
+    func makeNSView(context: Context) -> NSScrollView {
+        let scrollView = NSScrollView()
+        scrollView.hasVerticalScroller = true
+        scrollView.drawsBackground = false
+        let contentSize = scrollView.contentSize
+        let textView = NSTextView(frame: NSRect(origin: .zero, size: contentSize))
+        textView.isEditable = false
+        textView.isSelectable = true
+        textView.font = NSFont.monospacedSystemFont(ofSize: 13, weight: .regular)
+        textView.textColor = .labelColor
+        textView.drawsBackground = false
+        textView.minSize = NSSize(width: 0, height: contentSize.height)
+        textView.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
+        textView.isVerticallyResizable = true
+        textView.isHorizontallyResizable = false
+        textView.autoresizingMask = [.width]
+        textView.textContainer?.containerSize = NSSize(width: contentSize.width, height: .greatestFiniteMagnitude)
+        textView.textContainer?.widthTracksTextView = true
+        textView.string = content
+        scrollView.documentView = textView
+        Self.apply(content: content, query: query, to: textView)
+        return scrollView
+    }
+
+    func updateNSView(_ nsView: NSScrollView, context: Context) {
+        guard let tv = nsView.documentView as? NSTextView else { return }
+        if tv.string != content {
+            tv.string = content
+        }
+        Self.apply(content: content, query: query, to: tv)
+    }
+
+    private static func apply(content: String, query: String, to tv: NSTextView) {
+        SourceTextEditor.applyHighlighting(to: tv)
+        guard !query.isEmpty else { return }
+        let ns = content as NSString
+        var searchRange = NSRange(location: 0, length: ns.length)
+        while searchRange.location != NSNotFound {
+            let found = ns.range(of: query, options: [.caseInsensitive], range: searchRange)
+            if found.location == NSNotFound { break }
+            tv.textStorage?.addAttribute(
+                .backgroundColor,
+                value: NSColor.systemYellow.withAlphaComponent(0.35),
+                range: found
+            )
+            searchRange = NSRange(location: NSMaxRange(found), length: ns.length - NSMaxRange(found))
+        }
+    }
+}
+
 // MARK: - Entries list
 
 struct EntriesListView: View {
@@ -1007,7 +1242,6 @@ struct EntriesListView: View {
     @State private var draftDesc = ""
     @State private var draftEnabled = true
     @State private var draftError: String?
-    @State private var pendingDeleteOffsets: IndexSet?
 
     private var filtered: [HostEntry] {
         let q = query.trimmingCharacters(in: .whitespaces).lowercased()
@@ -1016,7 +1250,7 @@ struct EntriesListView: View {
         return entries.filter {
             ($0.ip ?? "").lowercased().contains(q) ||
             $0.hostList.joined(separator: " ").lowercased().contains(q) ||
-            ($0.desc ?? "").lowercased().contains(q)
+            localizedSeedDescription($0.desc, isEnglish: l10n.isEnglish).lowercased().contains(q)
         }
     }
 
@@ -1029,7 +1263,7 @@ struct EntriesListView: View {
                         systemImage: "rectangle.stack.badge.plus",
                         description: Text(l10n.s("点击“新增条目”开始添加", "Click “New Entry” to get started."))
                     )
-                    Button(l10n.s("新增条目", "New Entry"), systemImage: "plus") { withAnimation { isAdding = true } }
+                    Button(l10n.s("新增条目", "New Entry"), systemImage: "plus") { isAdding = true }
                         .buttonStyle(.glassProminent)
                 } else {
                     ContentUnavailableView(
@@ -1045,34 +1279,35 @@ struct EntriesListView: View {
                     if isAdding {
                         newEntryEditor
                             .id("new-entry-editor")
+                            .listRowSeparator(.hidden)
                     }
                     ForEach(filtered) { entry in
                         EntryRow(
                             entry: entry,
                             isEditing: editingID == entry.id,
-                            onBeginEdit: { withAnimation { editingID = entry.id } },
-                            onEndEdit: { withAnimation { editingID = nil } }
+                            isDimmed: (isAdding || editingID != nil) && editingID != entry.id,
+                            onBeginEdit: { editingID = entry.id },
+                            onEndEdit: { editingID = nil }
                         )
                         .id(entry.id)
-                    }
-                    .onDelete { offsets in
-                        pendingDeleteOffsets = offsets
+                        .listRowSeparator(.hidden)
                     }
                 }
                 .listStyle(.inset)
+                .alternatingRowBackgrounds(.enabled)
                 .scrollContentBackground(.hidden)
                 .background(.clear)
                 .onChange(of: isAdding) { _, adding in
                     if adding {
                         DispatchQueue.main.async {
-                            withAnimation { proxy.scrollTo("new-entry-editor", anchor: .top) }
+                            proxy.scrollTo("new-entry-editor", anchor: .top)
                         }
                     }
                 }
                 .onChange(of: editingID) { _, id in
                     if let id {
                         DispatchQueue.main.async {
-                            withAnimation { proxy.scrollTo(id, anchor: .center) }
+                            proxy.scrollTo(id, anchor: .center)
                         }
                     }
                 }
@@ -1088,39 +1323,6 @@ struct EntriesListView: View {
             } message: {
                 Text(deleteError ?? "")
             }
-            .confirmationDialog(
-                l10n.s("删除所选条目？", "Delete selected entries?"),
-                isPresented: Binding(
-                    get: { pendingDeleteOffsets != nil },
-                    set: { if !$0 { pendingDeleteOffsets = nil } }
-                ),
-                titleVisibility: .visible
-            ) {
-                Button(l10n.s("删除", "Delete"), role: .destructive) {
-                    deleteEntries(at: pendingDeleteOffsets ?? IndexSet())
-                    pendingDeleteOffsets = nil
-                }
-                Button(l10n.s("取消", "Cancel"), role: .cancel) {
-                    pendingDeleteOffsets = nil
-                }
-            } message: {
-                Text(l10n.s("此操作无法撤销。", "This action cannot be undone."))
-            }
-        }
-    }
-
-    private func deleteEntries(at offsets: IndexSet) {
-        let toDelete = offsets.compactMap { filtered.indices.contains($0) ? filtered[$0] : nil }
-        for e in toDelete where !e.isSystem {
-            context.delete(e)
-        }
-        do {
-            try context.save()
-            if let profileID = profile.id {
-                NotificationCenter.default.post(name: .profileEntriesChanged, object: profileID)
-            }
-        } catch {
-            deleteError = error.localizedDescription
         }
     }
 
@@ -1144,10 +1346,8 @@ struct EntriesListView: View {
     }
 
     private func cancelAdd() {
-        withAnimation {
-            isAdding = false
-            draftError = nil
-        }
+        isAdding = false
+        draftError = nil
     }
 
     private func saveAdd() {
@@ -1199,16 +1399,12 @@ struct EntriesListView: View {
             if let profileID = profile.id {
                 NotificationCenter.default.post(name: .profileEntriesChanged, object: profileID)
             }
-            DispatchQueue.main.async {
-                withAnimation {
-                    isAdding = false
-                    draftIP = "127.0.0.1"
-                    draftHosts = ""
-                    draftDesc = ""
-                    draftEnabled = true
-                    draftError = nil
-                }
-            }
+            isAdding = false
+            draftIP = "127.0.0.1"
+            draftHosts = ""
+            draftDesc = ""
+            draftEnabled = true
+            draftError = nil
         } catch {
             draftError = error.localizedDescription
         }
@@ -1218,6 +1414,7 @@ struct EntriesListView: View {
 struct EntryRow: View {
     @ObservedObject var entry: HostEntry
     let isEditing: Bool
+    let isDimmed: Bool
     let onBeginEdit: () -> Void
     let onEndEdit: () -> Void
     @Environment(\.managedObjectContext) private var context
@@ -1230,19 +1427,16 @@ struct EntryRow: View {
     @State private var showDeleteConfirm = false
 
     var body: some View {
-        VStack(spacing: 0) {
-            row
+        Group {
             if isEditing {
-                Divider()
-                    .padding(.horizontal, 8)
                 editor
-                    .padding(.top, 8)
-                    .transition(.opacity)
+            } else {
+                row
             }
         }
         .padding(.vertical, 4)
-        .opacity(entry.isEnabled ? 1 : 0.6)
-        .animation(.easeInOut(duration: 0.22), value: isEditing)
+        .opacity(entry.isEnabled || isEditing ? 1 : 0.6)
+        .opacity(isDimmed ? 0.35 : 1)
         .alert(
             l10n.s("保存失败", "Save Failed"),
             isPresented: Binding(
@@ -1276,7 +1470,7 @@ struct EntryRow: View {
             ))
             .toggleStyle(.switch)
             .labelsHidden()
-            .controlSize(.small)
+            .controlSize(.mini)
             .disabled(entry.isSystem)
 
             Text(entry.ip ?? "")
@@ -1299,36 +1493,24 @@ struct EntryRow: View {
 
             Spacer(minLength: 8)
 
-            Text(entry.desc ?? "")
+            Text(localizedSeedDescription(entry.desc, isEnglish: l10n.isEnglish))
                 .font(.system(size: 12.5))
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
 
             flagBadge
 
-            Button {
+            iconActionButton(systemName: "pencil", help: l10n.s("编辑", "Edit")) {
                 beginEdit()
-            } label: {
-                Image(systemName: "pencil")
-                    .font(.system(size: 13))
-                    .foregroundStyle(.secondary)
             }
-            .buttonStyle(.borderless)
-            .disabled(entry.isSystem || isEditing)
-            .help(l10n.s("编辑", "Edit"))
-
-            Button {
-                showDeleteConfirm = true
-            } label: {
-                Image(systemName: "trash")
-                    .font(.system(size: 13))
-                    .foregroundStyle(.secondary)
-            }
-            .buttonStyle(.borderless)
             .disabled(entry.isSystem)
-            .help(l10n.s("删除", "Delete"))
+
+            iconActionButton(systemName: "trash", help: l10n.s("删除", "Delete")) {
+                showDeleteConfirm = true
+            }
+            .disabled(entry.isSystem)
             .popover(isPresented: $showDeleteConfirm, arrowEdge: .bottom) {
-                DeleteConfirmPopover(
+                ConfirmPopover(
                     title: l10n.s("删除此条目？", "Delete this entry?"),
                     message: l10n.s("此操作无法撤销。", "This action cannot be undone."),
                     cancelTitle: l10n.s("取消", "Cancel"),
@@ -1341,6 +1523,20 @@ struct EntryRow: View {
                 )
             }
         }
+    }
+
+    private func iconActionButton(systemName: String, help: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: systemName)
+                .font(.system(size: 11, weight: .medium))
+                .frame(width: 32, height: 20)
+                .contentShape(Rectangle())
+        }
+        .controlSize(.mini)
+        .buttonBorderShape(.capsule)
+        .buttonStyle(.glass)
+        .frame(width: 32, height: 20)
+        .help(help)
     }
 
     private var editor: some View {
@@ -1438,9 +1634,7 @@ struct EntryRow: View {
             if let profileID = profile.id {
                 NotificationCenter.default.post(name: .profileEntriesChanged, object: profileID)
             }
-            DispatchQueue.main.async {
-                onEndEdit()
-            }
+            onEndEdit()
         } catch {
             saveError = error.localizedDescription
         }
@@ -1461,9 +1655,9 @@ struct EntryRow: View {
     }
 }
 
-// MARK: - Delete confirmation popover
+// MARK: - Inline confirmation popover
 
-struct DeleteConfirmPopover: View {
+struct ConfirmPopover: View {
     let title: String
     let message: String
     let cancelTitle: String
@@ -1495,9 +1689,11 @@ struct DeleteConfirmPopover: View {
             }
         }
         .padding(12)
-        .frame(width: 240)
+        .frame(width: 260)
     }
 }
+
+typealias DeleteConfirmPopover = ConfirmPopover
 
 // MARK: - Inline entry editor
 
@@ -1594,9 +1790,11 @@ final class SourceEditorProxy: ObservableObject {
         }
     }
 
-    func prepareFind(query: String) {
+    func applyFindHighlight(query: String) {
         guard let tv = textView else { return }
         let string = tv.string as NSString
+        let fullRange = NSRange(location: 0, length: string.length)
+        tv.textStorage?.removeAttribute(.backgroundColor, range: fullRange)
         findRanges.removeAll()
         guard !query.isEmpty else {
             findQuery = ""
@@ -1612,9 +1810,24 @@ final class SourceEditorProxy: ObservableObject {
             findRanges.append(found)
             searchRange = NSRange(location: NSMaxRange(found), length: string.length - NSMaxRange(found))
         }
+        for range in findRanges {
+            tv.textStorage?.addAttribute(
+                .backgroundColor,
+                value: NSColor.systemYellow.withAlphaComponent(0.35),
+                range: range
+            )
+        }
         status.findMatches = findRanges.count
         status.findIndex = findRanges.isEmpty ? 0 : 1
         objectWillChange.send()
+    }
+
+    func prepareFind(query: String) {
+        applyFindHighlight(query: query)
+    }
+
+    func reapplyFindHighlight() {
+        applyFindHighlight(query: findQuery)
     }
 
     @discardableResult
@@ -1783,8 +1996,7 @@ struct SourceTextEditor: NSViewRepresentable {
         textView.allowsUndo = true
         textView.font = NSFont.monospacedSystemFont(ofSize: 13, weight: .regular)
         textView.textColor = .labelColor
-        textView.drawsBackground = true
-        textView.backgroundColor = NSColor.controlBackgroundColor.withAlphaComponent(0.65)
+        textView.drawsBackground = false
         textView.minSize = NSSize(width: 0, height: contentSize.height)
         textView.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
         textView.isVerticallyResizable = true
@@ -1809,6 +2021,7 @@ struct SourceTextEditor: NSViewRepresentable {
             tv.string = text
             Self.applyHighlighting(to: tv)
             proxy.refreshStatus()
+            proxy.reapplyFindHighlight()
         }
         proxy.textView = tv
     }
@@ -1823,6 +2036,7 @@ struct SourceTextEditor: NSViewRepresentable {
         storage?.beginEditing()
         storage?.addAttribute(.font, value: mono, range: baseRange)
         storage?.addAttribute(.foregroundColor, value: NSColor.labelColor, range: baseRange)
+        storage?.removeAttribute(.backgroundColor, range: baseRange)
         if ns.length > 0 {
             ns.enumerateSubstrings(in: baseRange, options: [.byLines]) { substring, lineRange, _, _ in
                 guard let line = substring else { return }
@@ -1889,6 +2103,7 @@ struct SourceTextEditor: NSViewRepresentable {
             text.wrappedValue = tv.string
             SourceTextEditor.applyHighlighting(to: tv)
             proxy.refreshStatus()
+            proxy.reapplyFindHighlight()
         }
 
         func textViewDidChangeSelection(_ notification: Notification) {
@@ -1901,6 +2116,8 @@ struct SourceEditorView: View {
     @ObservedObject var profile: Profile
     @Binding var text: String
     let isDirty: Bool
+    let onApply: () -> Void
+    let toolbarQuery: String
     @Environment(\.managedObjectContext) private var context
     @EnvironmentObject private var l10n: Localization
     @StateObject private var proxy = SourceEditorProxy()
@@ -1908,6 +2125,7 @@ struct SourceEditorView: View {
     @State private var findText = ""
     @State private var replaceText = ""
     @State private var validationMessage: String?
+    @FocusState private var isReplaceFieldFocused: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -1930,17 +2148,30 @@ struct SourceEditorView: View {
                         .foregroundStyle(.red)
                         .help(validationMessage ?? "")
                 }
+                
                 Button(l10n.s("校验", "Validate")) {
                     validate()
                 }
                 .buttonStyle(.glass)
+                
                 Button {
-                    showFind = true
+                    showFind.toggle()
+                    isReplaceFieldFocused = showFind
                 } label: {
-                    Image(systemName: "magnifyingglass")
+                    Label(l10n.s("替换", "Replace"), systemImage: "arrow.2.squarepath")
                 }
                 .buttonStyle(.glass)
                 .help(l10n.s("查找与替换", "Find and Replace"))
+
+                Button {
+                    onApply()
+                } label: {
+                    Label(l10n.s("应用", "Apply"), systemImage: "checkmark.circle")
+                }
+                .buttonStyle(.glassProminent)
+                .disabled(validationMessage != nil || !profile.isEnabled)
+                .accessibilityIdentifier("apply-profile-button")
+                .help(l10n.s("预览后写入 /etc/hosts", "Preview, then write to /etc/hosts"))
             }
 
             if showFind {
@@ -1965,12 +2196,14 @@ struct SourceEditorView: View {
                     TextField(l10n.s("替换", "Replace"), text: $replaceText)
                         .textFieldStyle(.roundedBorder)
                         .frame(width: 170)
+                        .focused($isReplaceFieldFocused)
                     Button(l10n.s("全部替换", "Replace All")) {
                         _ = proxy.replaceAll(query: findText, replacement: replaceText)
                     }
                     .buttonStyle(.glass)
                     Button(l10n.s("完成", "Done")) {
                         showFind = false
+                        isReplaceFieldFocused = false
                     }
                     .buttonStyle(.glass)
                 }
@@ -2008,6 +2241,10 @@ struct SourceEditorView: View {
         .onAppear {
             validate()
             proxy.refreshStatus()
+            proxy.applyFindHighlight(query: toolbarQuery)
+        }
+        .onChange(of: toolbarQuery) { _, newValue in
+            proxy.applyFindHighlight(query: newValue)
         }
         .onChange(of: text) { _, _ in
             validate()
@@ -2042,7 +2279,7 @@ struct BackupsView: View {
         VStack(alignment: .leading, spacing: 16) {
             Text(l10n.s("备份", "Backups"))
                 .font(.system(size: 26, weight: .bold))
-            Text(l10n.s("每次写入前自动生成时间戳备份，可预览并还原。", "Timestamped backups are created before each write. Preview or restore anytime."))
+            Text(l10n.s("每次写入前自动生成时间戳备份，可查看并还原。", "Timestamped backups are created before each write. View or restore anytime."))
                 .font(.system(size: 13.5))
                 .foregroundStyle(.secondary)
 
@@ -2052,17 +2289,22 @@ struct BackupsView: View {
                 List(backups) { backup in
                     BackupRow(
                         backup: backup,
-                        onPreview: { previewBackup = backup },
-                        onRestore: { restoreBackup = backup },
+                        onView: { previewBackup = backup },
                         onDelete: { delete(backup) }
                     )
                 }
                 .listStyle(.inset)
+                .alternatingRowBackgrounds(.enabled)
+                .scrollContentBackground(.hidden)
+                .background(.clear)
             }
         }
         .padding(22)
         .sheet(item: $previewBackup) { backup in
-            BackupPreviewSheet(backup: backup)
+            BackupPreviewSheet(backup: backup) {
+                previewBackup = nil
+                restoreBackup = backup
+            }
         }
         .onAppear {
             do {
@@ -2170,50 +2412,35 @@ struct BackupsView: View {
 
 struct BackupRow: View {
     @ObservedObject var backup: BackupRecord
-    let onPreview: () -> Void
-    let onRestore: () -> Void
+    let onView: () -> Void
     let onDelete: () -> Void
     @EnvironmentObject private var l10n: Localization
     @State private var showDeleteConfirm = false
 
     var body: some View {
-        HStack {
-            Button {
-                onPreview()
-            } label: {
-                HStack {
-                    Image(systemName: "doc")
-                        .foregroundStyle(.blue)
-                    VStack(alignment: .leading) {
-                        Text((backup.filePath as NSString?)?.lastPathComponent ?? "")
-                            .font(.system(.body, design: .monospaced))
-                        Text(backup.note ?? "")
-                            .font(.system(size: 12))
-                            .foregroundStyle(.secondary)
-                    }
-                    Spacer()
-                }
-                .contentShape(Rectangle())
+        HStack(spacing: 10) {
+            Image(systemName: "doc")
+                .foregroundStyle(.blue)
+            VStack(alignment: .leading, spacing: 2) {
+                Text((backup.filePath as NSString?)?.lastPathComponent ?? "")
+                    .font(.system(.body, design: .monospaced))
+                Text(localizedBackupNote(backup.note, isEnglish: l10n.isEnglish))
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
             }
-            .buttonStyle(.plain)
+            Spacer()
 
-            Button(l10n.s("预览", "Preview"), systemImage: "eye") {
-                onPreview()
+            Button(l10n.s("查看", "View"), systemImage: "eye") {
+                onView()
             }
             .buttonStyle(.glass)
-
-            Button(l10n.s("还原", "Restore"), systemImage: "arrow.uturn.backward") {
-                onRestore()
-            }
-            .buttonStyle(.glassProminent)
-            .disabled(backup.filePath == nil)
 
             Button(l10n.s("删除", "Delete"), systemImage: "trash") {
                 showDeleteConfirm = true
             }
             .buttonStyle(.glass)
             .popover(isPresented: $showDeleteConfirm, arrowEdge: .bottom) {
-                DeleteConfirmPopover(
+                ConfirmPopover(
                     title: l10n.s("删除此备份？", "Delete this backup?"),
                     message: l10n.s("此操作无法撤销。", "This action cannot be undone."),
                     cancelTitle: l10n.s("取消", "Cancel"),
@@ -2226,11 +2453,13 @@ struct BackupRow: View {
                 )
             }
         }
+        .listRowSeparator(.hidden)
     }
 }
 
 struct BackupPreviewSheet: View {
     let backup: BackupRecord
+    let onRestore: () -> Void
     @EnvironmentObject private var l10n: Localization
     @Environment(\.dismiss) private var dismiss
 
@@ -2249,11 +2478,17 @@ struct BackupPreviewSheet: View {
             .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             HStack {
                 Spacer()
+                Button(l10n.s("还原", "Restore"), systemImage: "arrow.uturn.backward") {
+                    onRestore()
+                }
+                .buttonStyle(.glassProminent)
+                .disabled(backup.filePath == nil)
                 Button(l10n.s("关闭", "Close")) { dismiss() }.buttonStyle(.glass)
             }
         }
         .padding(20)
         .frame(width: 560, height: 440)
+        .buttonBorderShape(.capsule)
     }
 
     private var content: String {
@@ -2262,21 +2497,131 @@ struct BackupPreviewSheet: View {
     }
 }
 
+// MARK: - Helper guide
+
+struct HelperGuideSheet: View {
+    @EnvironmentObject private var l10n: Localization
+    @State private var message: String?
+    let onClose: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            HStack(spacing: 12) {
+                Image(systemName: "shield.checkered")
+                    .font(.system(size: 28))
+                    .foregroundStyle(.blue)
+                    .frame(width: 44, height: 44)
+                    .background(RoundedRectangle(cornerRadius: 10).fill(.blue.opacity(0.12)))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(l10n.s("启用后台写入助手", "Enable the Background Writer Helper"))
+                        .font(.system(size: 20, weight: .bold))
+                    Text(l10n.s("后台功能需要启用后才能使用。", "This background feature only works while it's enabled."))
+                        .font(.system(size: 12.5))
+                        .foregroundStyle(.secondary)
+                }
+            }
+
+            VStack(alignment: .leading, spacing: 10) {
+                guideRow(
+                    icon: "bolt.fill",
+                    title: l10n.s("静默写入 /etc/hosts", "Silent writes to /etc/hosts"),
+                    detail: l10n.s("修改 hosts 时不再每次输入管理员密码。", "Hosts changes are written without asking for your admin password each time.")
+                )
+                guideRow(
+                    icon: "arrow.triangle.2.circlepath",
+                    title: l10n.s("自动应用配置", "Automatic profile apply"),
+                    detail: l10n.s("切换配置、实时应用都会在后台自动完成。", "Profile switches and real-time applies complete automatically in the background.")
+                )
+                guideRow(
+                    icon: "lock.shield",
+                    title: l10n.s("仅本应用可用", "Only this app can call it"),
+                    detail: l10n.s("助手只接受本应用签名调用，安全可靠。", "The helper only accepts calls from this signed app.")
+                )
+            }
+
+            Divider()
+
+            Text(l10n.s("如何启用", "How to enable"))
+                .font(.system(size: 14, weight: .semibold))
+            VStack(alignment: .leading, spacing: 8) {
+                guideStep(1, l10n.s("点击下方“立即启用”。", "Tap Enable Now below."))
+                guideStep(2, l10n.s(
+                    "在弹出的系统设置 → 通用 → 登录项与扩展中，找到 Hosts Manager 并打开助手。",
+                    "In System Settings > General > Login Items & Extensions, find Hosts Manager and turn on the helper."
+                ))
+            }
+
+            if let message {
+                Text(message)
+                    .font(.system(size: 12))
+                    .foregroundStyle(.orange)
+            }
+
+            HStack {
+                Spacer()
+                Button(l10n.s("暂不启用", "Not Now")) {
+                    onClose()
+                }
+                .buttonStyle(.glass)
+
+                Button(l10n.s("立即启用", "Enable Now")) {
+                    let error = HostsHelperClient.enable(isEnglish: l10n.isEnglish)
+                    if let error {
+                        message = error
+                    } else if HostsHelperClient.isRegistered {
+                        onClose()
+                    } else {
+                        message = l10n.s(
+                            "已请求启用，请在系统设置中允许后返回。",
+                            "Enable requested. Allow it in System Settings, then come back."
+                        )
+                        HostsHelperClient.openSystemSettingsLoginItems()
+                    }
+                }
+                .buttonStyle(.glassProminent)
+            }
+        }
+        .padding(24)
+        .frame(width: 500)
+    }
+
+    private func guideRow(icon: String, title: String, detail: String) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: icon)
+                .font(.system(size: 15))
+                .foregroundStyle(.blue)
+                .frame(width: 24)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.system(size: 13, weight: .semibold))
+                Text(detail)
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private func guideStep(_ number: Int, _ text: String) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            Text("\(number)")
+                .font(.system(size: 11, weight: .bold))
+                .foregroundStyle(.white)
+                .frame(width: 18, height: 18)
+                .background(Circle().fill(Color.accentColor))
+            Text(text)
+                .font(.system(size: 12.5))
+        }
+    }
+}
+
 // MARK: - Settings
 
 struct SettingsView: View {
     @FetchRequest private var settings: FetchedResults<AppSettings>
-    @FetchRequest(sortDescriptors: [
-        NSSortDescriptor(keyPath: \Profile.isSystem, ascending: false),
-        NSSortDescriptor(keyPath: \Profile.createdAt, ascending: true)
-    ])
-    private var profiles: FetchedResults<Profile>
     @EnvironmentObject private var l10n: Localization
-    @AppStorage("language") private var language = "system"
     @AppStorage("appearance") private var appearance = "system"
     @State private var retention = 30
     @State private var defaultView = EntryMode.list.rawValue
-    @State private var defaultProfileID: UUID?
     @State private var helperStatus = ""
     @State private var installMessage: String?
     @State private var settingsError: String?
@@ -2291,16 +2636,6 @@ struct SettingsView: View {
                 .padding(.bottom, 16)
 
             VStack(spacing: 0) {
-                SettingsRow(label: l10n.s("默认配置", "Default profile")) {
-                    Picker("", selection: $defaultProfileID) {
-                        Text(l10n.s("无", "None")).tag(UUID?.none)
-                        ForEach(profiles.filter { !$0.isSystem }) { profile in
-                            Text(profile.name ?? "").tag(profile.id)
-                        }
-                    }
-                    .labelsHidden()
-                }
-                Divider()
                 SettingsRow(label: l10n.s("默认视图", "Default view")) {
                     Picker("", selection: $defaultView) {
                         Label(l10n.s("列表", "List"), systemImage: "list.bullet").tag(EntryMode.list.rawValue)
@@ -2315,7 +2650,7 @@ struct SettingsView: View {
                 }
                 Divider()
                 SettingsRow(label: l10n.s("界面语言", "Interface language")) {
-                    Picker("", selection: $language) {
+                    Picker("", selection: $l10n.language) {
                         Text(l10n.s("跟随系统", "Follow system")).tag("system")
                         Text("中文").tag("zh")
                         Text("English").tag("en")
@@ -2339,27 +2674,37 @@ struct SettingsView: View {
             .overlay(RoundedRectangle(cornerRadius: 14).stroke(.quaternary.opacity(0.4)))
             .clipShape(RoundedRectangle(cornerRadius: 14))
 
-            HStack(spacing: 10) {
+            HStack(alignment: .top, spacing: 10) {
                 Image(systemName: "shield.lefthalf.filled")
                     .foregroundStyle(.blue)
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(l10n.s("特权助手：\(helperStatus)", "Helper: \(helperStatus)"))
+                    .padding(.top, 1)
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(l10n.s("后台写入助手：\(helperStatus)", "Background Writer Helper: \(helperStatus)"))
                         .font(.system(size: 12.5))
                         .foregroundStyle(.secondary)
+                    Text(l10n.s(
+                        "启用后可静默写入 /etc/hosts，无需每次输入管理员密码，切换配置与实时应用都会在后台自动完成。助手仅接受本应用的签名调用。",
+                        "When enabled, hosts changes are written silently without asking for your admin password each time, and profile switches and real-time applies complete automatically in the background. The helper only accepts calls signed by this app."
+                    ))
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
                     if let installMessage {
                         installMessageView(installMessage)
                     }
-                    HStack {
-                        Button(l10n.s("安装 / 注册助手", "Install / Register Helper")) {
-                            let error = HostsHelperClient.install()
-                            installMessage = error ?? l10n.s("已请求注册，请到系统设置批准", "Registration requested. Approve it in System Settings.")
-                            refreshHelperStatus()
-                        }
-                        .buttonStyle(.glass)
-
-                        Button(l10n.s("重新注册", "Repair Registration")) {
-                            let error = HostsHelperClient.repair()
-                            installMessage = error ?? l10n.s("助手已重新注册。", "Helper registration was repaired.")
+                    if !HostsHelperClient.isRegistered {
+                        Button(l10n.s("启用助手", "Enable Helper")) {
+                            let error = HostsHelperClient.enable(isEnglish: l10n.isEnglish)
+                            if let error {
+                                installMessage = error
+                            } else if HostsHelperClient.isRegistered {
+                                installMessage = l10n.s("助手已启用。", "Helper is enabled.")
+                            } else {
+                                installMessage = l10n.s(
+                                    "已请求启用，请在系统设置中允许后返回。",
+                                    "Enable requested. Allow it in System Settings, then come back."
+                                )
+                                HostsHelperClient.openSystemSettingsLoginItems()
+                            }
                             refreshHelperStatus()
                         }
                         .buttonStyle(.glass)
@@ -2377,16 +2722,11 @@ struct SettingsView: View {
             refreshHelperStatus()
             if let s = settings.first {
                 retention = Int(s.backupRetention)
-                defaultProfileID = s.defaultProfileID
                 defaultView = s.defaultView ?? EntryMode.list.rawValue
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             refreshHelperStatus()
-        }
-        .onChange(of: defaultProfileID) { _, newValue in
-            settings.first?.defaultProfileID = newValue
-            saveSettings()
         }
         .onChange(of: defaultView) { _, newValue in
             settings.first?.defaultView = newValue
@@ -2479,6 +2819,12 @@ struct ApplySheet: View {
         }
         .frame(width: 620, height: 500)
         .padding(22)
+        .buttonBorderShape(.capsule)
+    }
+
+    private var otherActiveProfiles: [Profile] {
+        let all = (try? context.fetch(Profile.fetchRequest())) ?? []
+        return all.filter { $0.isActive && !$0.isSystem && $0.id != profile.id }
     }
 
     private var target: String {
@@ -2486,8 +2832,17 @@ struct ApplySheet: View {
     }
 
     private var parsed: [ParsedHostEntry] {
-        profile.sortedEntries.map {
-            ParsedHostEntry(ip: $0.ip ?? "", hostnames: $0.hostList, desc: $0.desc ?? "", isEnabled: $0.isEnabled, isSystem: $0.isSystem)
+        // 应用时把其它已启用配置的条目一并合并，预览和冲突检查都以并集为准。
+        (otherActiveProfiles + [profile]).flatMap { p in
+            p.sortedEntries.map {
+                ParsedHostEntry(
+                    ip: $0.ip ?? "",
+                    hostnames: $0.hostList,
+                    desc: localizedSeedDescription($0.desc, isEnglish: l10n.isEnglish),
+                    isEnabled: $0.isEnabled,
+                    isSystem: $0.isSystem
+                )
+            }
         }
     }
 
@@ -2501,7 +2856,10 @@ struct ApplySheet: View {
 
     private var preview: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text(l10n.s("应用“\(profile.name ?? "")”", "Apply “\(profile.name ?? "")”"))
+            Text(l10n.s(
+                "应用“\(profile.localizedName(isEnglish: l10n.isEnglish))”",
+                "Apply “\(profile.localizedName(isEnglish: l10n.isEnglish))”"
+            ))
                 .font(.system(size: 20, weight: .bold))
             HStack(spacing: 8) {
                 Image(systemName: "clock.arrow.circlepath")
@@ -2569,7 +2927,10 @@ struct ApplySheet: View {
                     Image(systemName: "checkmark.circle.fill")
                         .font(.system(size: 22))
                         .foregroundStyle(.green)
-                    Text(l10n.s("已应用“\(profile.name ?? "")”到 /etc/hosts", "Applied “\(profile.name ?? "")” to /etc/hosts"))
+                    Text(l10n.s(
+                        "已应用“\(profile.localizedName(isEnglish: l10n.isEnglish))”到 /etc/hosts",
+                        "Applied “\(profile.localizedName(isEnglish: l10n.isEnglish))” to /etc/hosts"
+                    ))
                         .font(.system(size: 15, weight: .semibold))
                 }
                 Text(l10n.s("备份已保存到备份目录。", "A backup was saved to the backup folder."))
@@ -2668,10 +3029,8 @@ struct ApplySheet: View {
                 try recordBackup(at: backupURL)
                 profile.isActive = true
                 profile.isEnabled = true
+                profile.lastActivatedAt = Date()
                 profile.updatedAt = Date()
-                for p in (profile.managedObjectContext?.registeredObjects.compactMap { $0 as? Profile } ?? []) where p !== profile {
-                    p.isActive = false
-                }
                 try context.save()
                 sourceDraftCleanup()
                 await MainActor.run { phase = .done }
@@ -2706,8 +3065,11 @@ struct ApplySheet: View {
         record.id = UUID()
         record.timestamp = Date()
         record.filePath = url.path
-        record.profileName = profile.name
-        record.note = l10n.s("应用“\(profile.name ?? "")”前自动备份", "Auto backup before applying “\(profile.name ?? "")”")
+        record.profileName = profile.localizedName(isEnglish: l10n.isEnglish)
+        record.note = l10n.s(
+            "应用“\(profile.localizedName(isEnglish: l10n.isEnglish))”前自动备份",
+            "Auto backup before applying “\(profile.localizedName(isEnglish: l10n.isEnglish))”"
+        )
         try context.save()
         try BackupMaintenance.prune(context: context)
     }
@@ -2722,9 +3084,12 @@ struct ApplySheet: View {
             case .invalidContent(_):
                 return l10n.s("内容无效，无法写入。", "The hosts content is invalid.")
             case .authorizationFailed:
-                return l10n.s("特权助手拒绝了授权。", "The privileged helper rejected authorization.")
-            case .denied:
-                return l10n.s("已取消管理员授权。", "Administrator authorization was cancelled.")
+                return l10n.s("后台写入助手拒绝了授权。", "The background writer helper rejected authorization.")
+            case .helperUnavailable:
+                return l10n.s(
+                    "后台写入助手不可用，请先在设置中启用并批准。",
+                    "The background writer helper is unavailable. Enable and approve it in Settings first."
+                )
             case .writeFailed:
                 return l10n.s("写入 /etc/hosts 失败。", "Failed to write /etc/hosts.")
             case .readFailed:
@@ -2732,7 +3097,7 @@ struct ApplySheet: View {
             case .verificationFailed:
                 return l10n.s("写入后校验失败。", "Verification failed after writing.")
             case .timedOut:
-                return l10n.s("特权助手响应超时。", "The privileged helper timed out.")
+                return l10n.s("后台写入助手响应超时。", "The background writer helper timed out.")
             case .alreadyInProgress:
                 return l10n.s("已有写入任务正在进行。", "Another write is already in progress.")
             }

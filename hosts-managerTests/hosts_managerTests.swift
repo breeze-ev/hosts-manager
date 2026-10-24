@@ -44,6 +44,26 @@ struct HostsParserTests {
         #expect(!content.contains("old.local"))
     }
 
+    @Test func mergeUnionsMultipleProfilesAndDedupes() {
+        // Simulates two profiles active at once: their enabled entries are
+        // flattened into one list before merging, exact duplicates collapse,
+        // and disabled entries never appear.
+        let profileA = [
+            ParsedHostEntry(ip: "10.0.0.1", hostnames: ["api.local"], isEnabled: true),
+            ParsedHostEntry(ip: "10.0.0.2", hostnames: ["db.local"], isEnabled: false)
+        ]
+        let profileB = [
+            ParsedHostEntry(ip: "10.0.0.1", hostnames: ["api.local"], isEnabled: true),
+            ParsedHostEntry(ip: "10.0.0.3", hostnames: ["cache.local"], isEnabled: true)
+        ]
+        let content = HostsParser.mergedContent(entries: profileA + profileB)
+
+        let apiCount = content.components(separatedBy: "api.local").count - 1
+        #expect(apiCount == 1)
+        #expect(content.contains("cache.local"))
+        #expect(!content.contains("db.local"))
+    }
+
     @Test func dedupeRemovesExactDuplicates() {
         let entries = [
             ParsedHostEntry(ip: "1.1.1.1", hostnames: ["a.com"]),
@@ -282,5 +302,120 @@ struct PersistenceTests {
         #expect(settings.count == 1)
         #expect(settings.first?.backupRetention == 30)
         #expect(settings.first?.defaultView == "list")
+    }
+
+    @Test func seededProfileTracksLastActivation() throws {
+        let controller = PersistenceController(inMemory: true)
+        #expect(controller.loadError == nil)
+
+        let profiles = try controller.container.viewContext.fetch(Profile.fetchRequest())
+        guard let custom = profiles.first(where: { !$0.isSystem }) else {
+            Issue.record("Expected a custom profile to exist")
+            return
+        }
+        #expect(custom.isActive)
+        #expect(custom.lastActivatedAt != nil)
+    }
+
+    @Test func activeProfilesGetActivationTimestampBackfilled() throws {
+        let controller = PersistenceController(inMemory: true)
+        #expect(controller.loadError == nil)
+
+        let profiles = try controller.container.viewContext.fetch(Profile.fetchRequest())
+        guard let custom = profiles.first(where: { !$0.isSystem }) else {
+            Issue.record("Expected a custom profile to exist")
+            return
+        }
+        custom.lastActivatedAt = nil
+        try controller.container.viewContext.save()
+        try controller.ensureDefaults()
+        #expect(custom.lastActivatedAt != nil)
+    }
+
+    @Test func seededDefaultEntriesAreDisabled() throws {
+        // The default entries are only created when the real /etc/hosts has no
+        // user entries, so only assert the invariant when they are present.
+        let controller = PersistenceController(inMemory: true)
+        #expect(controller.loadError == nil)
+
+        let profiles = try controller.container.viewContext.fetch(Profile.fetchRequest())
+        guard let profile = profiles.first(where: { !$0.isSystem }) else {
+            Issue.record("Expected a custom profile to exist")
+            return
+        }
+
+        let entries = profile.sortedEntries
+        let defaultHostnames = ["api.dev.local", "mysql.db.local"]
+        let defaults = entries.filter { entry in
+            entry.hostList.contains { defaultHostnames.contains($0) }
+        }
+        guard !defaults.isEmpty else { return }
+
+        #expect(defaults.count == 2)
+        #expect(defaults.allSatisfy { !$0.isEnabled })
+    }
+
+    @Test func builtInProfileNamesUseLocalizedDisplay() throws {
+        let controller = PersistenceController(inMemory: true)
+        #expect(controller.loadError == nil)
+
+        let profiles = try controller.container.viewContext.fetch(Profile.fetchRequest())
+        let system = profiles.first(where: \.isSystem)
+        let custom = profiles.first(where: { !$0.isSystem })
+        #expect(system?.localizedName(isEnglish: true) == "System")
+        #expect(system?.localizedName(isEnglish: false) == "系统")
+        #expect(custom?.localizedName(isEnglish: true) == "Default")
+        #expect(custom?.localizedName(isEnglish: false) == "默认")
+    }
+
+    @Test func seedDescriptionsLocalize() {
+        #expect(localizedSeedDescription("Local API service", isEnglish: false) == "本地 API 服务")
+        #expect(localizedSeedDescription("本地 API 服务", isEnglish: true) == "Local API service")
+        #expect(localizedSeedDescription("Development database", isEnglish: false) == "开发数据库")
+        #expect(localizedSeedDescription("开发数据库", isEnglish: true) == "Development database")
+        #expect(localizedSeedDescription("custom description", isEnglish: true) == "custom description")
+    }
+
+    @Test func backupNotesLocalize() {
+        #expect(localizedBackupNote("启用配置前自动备份", isEnglish: true) == "Auto backup before enabling profile")
+        #expect(localizedBackupNote("Auto backup before enabling profile", isEnglish: false) == "启用配置前自动备份")
+        #expect(localizedBackupNote("应用“默认”前自动备份", isEnglish: true) == "Auto backup before applying “Default”")
+        #expect(localizedBackupNote("Auto backup before applying “Default”", isEnglish: false) == "应用“默认”前自动备份")
+        #expect(localizedBackupNote("导入 2026-10-24 1000", isEnglish: true) == "Imported 2026-10-24 1000")
+        #expect(localizedBackupNote("Imported 2026-10-24 1000", isEnglish: false) == "导入 2026-10-24 1000")
+    }
+
+    @Test func generatedProfileNamesLocalize() {
+        #expect(localizedProfileName("新配置", isEnglish: true) == "New Profile")
+        #expect(localizedProfileName("New Profile", isEnglish: false) == "新配置")
+        #expect(localizedProfileName("默认 副本", isEnglish: true) == "Default Copy")
+        #expect(localizedProfileName("Default Copy", isEnglish: false) == "默认 副本")
+        #expect(localizedProfileName("导入 2026-10-24 1000", isEnglish: true) == "Imported 2026-10-24 1000")
+        #expect(localizedProfileName("Imported 2026-10-24 1000", isEnglish: false) == "导入 2026-10-24 1000")
+        #expect(localizedProfileName("从备份恢复 2026-10-24", isEnglish: true) == "Restored from backup 2026-10-24")
+        #expect(localizedProfileName("Restored from backup 2026-10-24", isEnglish: false) == "从备份恢复 2026-10-24")
+    }
+}
+
+struct LocalizationPreferenceTests {
+    @Test func appleLanguagesFollowLanguagePreference() {
+        let defaults = UserDefaults.standard
+        let previous = defaults.array(forKey: "AppleLanguages") as? [String]
+        defer {
+            if let previous {
+                defaults.set(previous, forKey: "AppleLanguages")
+            } else {
+                defaults.removeObject(forKey: "AppleLanguages")
+            }
+        }
+
+        LocalizationPreference.applyAppleLanguages(for: "zh")
+        #expect(defaults.array(forKey: "AppleLanguages") as? [String] == ["zh-Hans"])
+
+        LocalizationPreference.applyAppleLanguages(for: "en")
+        #expect(defaults.array(forKey: "AppleLanguages") as? [String] == ["en"])
+
+        LocalizationPreference.applyAppleLanguages(for: "system")
+        #expect(defaults.array(forKey: "AppleLanguages") as? [String] == previous)
     }
 }

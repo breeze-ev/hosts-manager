@@ -17,7 +17,6 @@ const I18N = {
     backupsTitle: "备份", backupsSub: "每次写入前自动生成时间戳备份，可预览并还原。",
     preview: "预览", restore: "还原",
     settingsTitle: "设置", settingsSub: "管理默认行为、外观与备份策略。",
-    defaultProfile: "默认配置", defaultProfileDesc: "启动时选中的配置",
     startup: "启动行为", startupDesc: "打开 App 时的默认视图",
     lastView: "上次视图", profilesView: "配置列表",
     retention: "备份保留数量", retentionDesc: "超过数量后自动清理旧备份",
@@ -63,7 +62,6 @@ const I18N = {
     backupsTitle: "Backups", backupsSub: "Timestamped backups are created before each write. Preview or restore anytime.",
     preview: "Preview", restore: "Restore",
     settingsTitle: "Settings", settingsSub: "Manage defaults, appearance, and backup policy.",
-    defaultProfile: "Default Profile", defaultProfileDesc: "Profile selected at launch",
     startup: "Startup Behavior", startupDesc: "Default view when the app opens",
     lastView: "Last view", profilesView: "Profiles",
     retention: "Backup Retention", retentionDesc: "Older backups are cleaned up beyond this count",
@@ -368,8 +366,6 @@ function renderBackups(){
 }
 
 function renderSettings(){
-  const sel = $("#setDefaultProfile");
-  sel.innerHTML = DATA.profiles.map(p => `<option value="${p.id}" ${p.id===state.currentProfile?"selected":""}>${esc(profileName(p))}</option>`).join("");
   const startup = $("#setStartupView");
   startup.innerHTML = `<option value="last">${esc(t("lastView"))}</option><option value="profiles">${esc(t("profilesView"))}</option><option value="backups">${esc(t("backups"))}</option>`;
   syncLangSeg();
@@ -754,13 +750,6 @@ document.addEventListener("keydown", e => {
   if(e.target.id === "f-host" && e.key === "Enter"){
     e.preventDefault();
     addFormHost();
-  }
-});
-
-document.addEventListener("change", e => {
-  if(e.target.id === "setDefaultProfile"){
-    state.currentProfile = e.target.value;
-    renderAll();
   }
 });
 
