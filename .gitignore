@@ -1,0 +1,15 @@
+.DS_Store
+.swiftpm/
+DerivedData/
+build/
+dist/
+*.xcuserstate
+xcuserdata/
+*.dmg
+*.sha256
+*.p12
+*.p8
+*.key
+.env
+secrets/
+Config/Local.xcconfig

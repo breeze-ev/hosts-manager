@@ -8,7 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		B1000000000000000000000B /* HostsManagerHelper in Copy Helper Executable */ = {isa = PBXBuildFile; fileRef = B1000000000000000000000E /* HostsManagerHelper */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
-		B1000000000000000000000D /* com.breeze.hostsmanager.helper.plist in Copy Helper Plist */ = {isa = PBXBuildFile; fileRef = B1000000000000000000000F /* com.breeze.hostsmanager.helper.plist */; };
+		B1000000000000000000000D /* io.github.breeze-ev.hostsmanager.helper.plist in Copy Helper Plist */ = {isa = PBXBuildFile; fileRef = B1000000000000000000000F /* io.github.breeze-ev.hostsmanager.helper.plist */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -53,7 +53,7 @@
 			dstPath = Contents/Library/LaunchDaemons;
 			dstSubfolderSpec = 1;
 			files = (
-				B1000000000000000000000D /* com.breeze.hostsmanager.helper.plist in Copy Helper Plist */,
+				B1000000000000000000000D /* io.github.breeze-ev.hostsmanager.helper.plist in Copy Helper Plist */,
 			);
 			name = "Copy Helper Plist";
 			runOnlyForDeploymentPostprocessing = 0;
@@ -65,7 +65,7 @@
 		A8EA9D26303558C100530128 /* hosts-managerTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "hosts-managerTests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
 		A8EA9D30303558C100530128 /* hosts-managerUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "hosts-managerUITests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
 		B1000000000000000000000E /* HostsManagerHelper */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = HostsManagerHelper; sourceTree = BUILT_PRODUCTS_DIR; };
-		B1000000000000000000000F /* com.breeze.hostsmanager.helper.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = com.breeze.hostsmanager.helper.plist; sourceTree = "<group>"; };
+		B1000000000000000000000F /* io.github.breeze-ev.hostsmanager.helper.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = "io.github.breeze-ev.hostsmanager.helper.plist"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -134,7 +134,7 @@
 				A8EA9D16303558C000530128 /* hosts-manager */,
 				B10000000000000000000010 /* Shared */,
 				B10000000000000000000011 /* HostsHelper */,
-				B1000000000000000000000F /* com.breeze.hostsmanager.helper.plist */,
+				B1000000000000000000000F /* io.github.breeze-ev.hostsmanager.helper.plist */,
 				A8EA9D29303558C100530128 /* hosts-managerTests */,
 				A8EA9D33303558C100530128 /* hosts-managerUITests */,
 				A8EA9D15303558C000530128 /* Products */,
@@ -409,7 +409,6 @@
 				COPY_PHASE_STRIP = NO;
 				DEAD_CODE_STRIPPING = YES;
 				DEBUG_INFORMATION_FORMAT = dwarf;
-				DEVELOPMENT_TEAM = Y724PV6L7L;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_TESTABILITY = YES;
 				ENABLE_USER_SCRIPT_SANDBOXING = YES;
@@ -428,7 +427,7 @@
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
-				MACOSX_DEPLOYMENT_TARGET = 26.5;
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;
@@ -476,7 +475,6 @@
 				COPY_PHASE_STRIP = NO;
 				DEAD_CODE_STRIPPING = YES;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
-				DEVELOPMENT_TEAM = Y724PV6L7L;
 				ENABLE_NS_ASSERTIONS = NO;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_USER_SCRIPT_SANDBOXING = YES;
@@ -489,7 +487,7 @@
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
-				MACOSX_DEPLOYMENT_TARGET = 26.5;
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				SDKROOT = macosx;
@@ -507,7 +505,6 @@
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 1;
 				DEAD_CODE_STRIPPING = YES;
-				DEVELOPMENT_TEAM = Y724PV6L7L;
 				ENABLE_APP_SANDBOX = NO;
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_PREVIEWS = YES;
@@ -522,8 +519,8 @@
 					"@executable_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 26.0;
-				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = "personal.hosts-manager";
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "io.github.breeze-ev.hostsmanager";
 				PRODUCT_MODULE_NAME = hosts_manager;
 				PRODUCT_NAME = "Hosts Manager";
 				REGISTER_APP_GROUPS = YES;
@@ -545,7 +542,6 @@
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 1;
 				DEAD_CODE_STRIPPING = YES;
-				DEVELOPMENT_TEAM = Y724PV6L7L;
 				ENABLE_APP_SANDBOX = NO;
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_PREVIEWS = YES;
@@ -560,8 +556,8 @@
 					"@executable_path/../Frameworks",
 				);
 				MACOSX_DEPLOYMENT_TARGET = 26.0;
-				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = "personal.hosts-manager";
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "io.github.breeze-ev.hostsmanager";
 				PRODUCT_MODULE_NAME = hosts_manager;
 				PRODUCT_NAME = "Hosts Manager";
 				REGISTER_APP_GROUPS = YES;
@@ -581,11 +577,10 @@
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEAD_CODE_STRIPPING = YES;
-				DEVELOPMENT_TEAM = Y724PV6L7L;
 				GENERATE_INFOPLIST_FILE = YES;
-				MACOSX_DEPLOYMENT_TARGET = 26.5;
-				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = "personal.hosts-managerTests";
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "io.github.breeze-ev.hostsmanagerTests";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = NO;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
@@ -603,11 +598,10 @@
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEAD_CODE_STRIPPING = YES;
-				DEVELOPMENT_TEAM = Y724PV6L7L;
 				GENERATE_INFOPLIST_FILE = YES;
-				MACOSX_DEPLOYMENT_TARGET = 26.5;
-				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = "personal.hosts-managerTests";
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "io.github.breeze-ev.hostsmanagerTests";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = NO;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
@@ -624,10 +618,9 @@
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEAD_CODE_STRIPPING = YES;
-				DEVELOPMENT_TEAM = Y724PV6L7L;
 				GENERATE_INFOPLIST_FILE = YES;
-				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = "personal.hosts-managerUITests";
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "io.github.breeze-ev.hostsmanagerUITests";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = NO;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
@@ -644,10 +637,9 @@
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEAD_CODE_STRIPPING = YES;
-				DEVELOPMENT_TEAM = Y724PV6L7L;
 				GENERATE_INFOPLIST_FILE = YES;
-				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = "personal.hosts-managerUITests";
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "io.github.breeze-ev.hostsmanagerUITests";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = NO;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
@@ -664,12 +656,11 @@
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEAD_CODE_STRIPPING = YES;
-				DEVELOPMENT_TEAM = Y724PV6L7L;
 				ENABLE_HARDENED_RUNTIME = YES;
 				GENERATE_INFOPLIST_FILE = YES;
-				MACOSX_DEPLOYMENT_TARGET = 26.5;
-				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.breeze.hostsmanager.helper;
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "io.github.breeze-ev.hostsmanager.helper";
 				PRODUCT_MODULE_NAME = HostsManagerHelper;
 				PRODUCT_NAME = HostsManagerHelper;
 				SKIP_INSTALL = YES;
@@ -684,12 +675,11 @@
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEAD_CODE_STRIPPING = YES;
-				DEVELOPMENT_TEAM = Y724PV6L7L;
 				ENABLE_HARDENED_RUNTIME = YES;
 				GENERATE_INFOPLIST_FILE = YES;
-				MACOSX_DEPLOYMENT_TARGET = 26.5;
-				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = com.breeze.hostsmanager.helper;
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
+				MARKETING_VERSION = 0.1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "io.github.breeze-ev.hostsmanager.helper";
 				PRODUCT_MODULE_NAME = HostsManagerHelper;
 				PRODUCT_NAME = HostsManagerHelper;
 				SKIP_INSTALL = YES;

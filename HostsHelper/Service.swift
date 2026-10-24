@@ -2,7 +2,7 @@ import Foundation
 import Security
 
 final class HostsHelperService: NSObject, HostsHelperServiceProtocol {
-    private static let writeQueue = DispatchQueue(label: "com.breeze.hostsmanager.helper.write")
+    private static let writeQueue = DispatchQueue(label: "io.github.breeze-ev.hostsmanager.helper.write")
     private let hostsURL = URL(fileURLWithPath: "/etc/hosts")
 
     func writeHosts(
@@ -50,9 +50,18 @@ private enum HostsHelperAuthorization {
             return false
         }
 
+        guard let teamIdentifier = ownTeamIdentifier() else {
+            return false
+        }
+        let codeRequirement = HostsHelperConstants.clientCodeRequirement(teamIdentifier: teamIdentifier)
+
+        guard !codeRequirement.isEmpty else {
+            return false
+        }
+
         var requirement: SecRequirement?
         guard SecRequirementCreateWithString(
-            HostsHelperConstants.clientCodeRequirement as CFString,
+            codeRequirement as CFString,
             [],
             &requirement
         ) == errSecSuccess,
@@ -60,5 +69,22 @@ private enum HostsHelperAuthorization {
             return false
         }
         return SecCodeCheckValidity(guestCode, [], requirement) == errSecSuccess
+    }
+
+    private static func ownTeamIdentifier() -> String? {
+        var code: SecCode?
+        guard SecCodeCopySelf([], &code) == errSecSuccess, let code else { return nil }
+
+        var staticCode: SecStaticCode?
+        guard SecCodeCopyStaticCode(code, [], &staticCode) == errSecSuccess, let staticCode else { return nil }
+
+        var information: CFDictionary?
+        guard SecCodeCopySigningInformation(staticCode, [], &information) == errSecSuccess,
+              let information,
+              let teamIdentifier = (information as NSDictionary)[kSecCodeInfoTeamIdentifier] as? String,
+              !teamIdentifier.isEmpty else {
+            return nil
+        }
+        return teamIdentifier
     }
 }

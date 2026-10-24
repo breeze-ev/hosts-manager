@@ -50,10 +50,10 @@ final class hosts_managerUITests: XCTestCase {
         XCTAssertTrue(editMode.waitForExistence(timeout: 4))
         editMode.click()
 
-        let validate = app.descendants(matching: .any)
+        let validate = app.buttons
             .matching(NSPredicate(format: "label == %@ OR label == %@", "校验", "Validate"))
             .firstMatch
-        if !validate.waitForExistence(timeout: 8) {
+        if !validate.waitForExistence(timeout: 12) {
             let attachment = XCTAttachment(screenshot: app.screenshot())
             attachment.name = "EditorFailure"
             attachment.lifetime = .keepAlways

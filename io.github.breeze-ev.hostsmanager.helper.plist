@@ -3,17 +3,17 @@
 <plist version="1.0">
   <dict>
     <key>Label</key>
-    <string>com.breeze.hostsmanager.helper</string>
+    <string>io.github.breeze-ev.hostsmanager.helper</string>
     <key>BundleProgram</key>
     <string>Contents/MacOS/HostsManagerHelper</string>
     <key>MachServices</key>
     <dict>
-      <key>com.breeze.hostsmanager.helper</key>
+      <key>io.github.breeze-ev.hostsmanager.helper</key>
       <true/>
     </dict>
     <key>AssociatedBundleIdentifiers</key>
     <array>
-      <string>personal.hosts-manager</string>
+      <string>io.github.breeze-ev.hostsmanager</string>
     </array>
   </dict>
 </plist>

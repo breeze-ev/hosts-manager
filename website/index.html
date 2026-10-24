@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Hosts Manager is an open source macOS app for managing /etc/hosts with profiles, live apply, and automatic backups.">
+  <meta property="og:title" content="Hosts Manager">
+  <meta property="og:description" content="Open source macOS app for managing /etc/hosts with profiles, live apply, and automatic backups.">
+  <meta property="og:image" content="https://breeze-ev.github.io/hosts-manager/assets/og-cover.png">
+  <meta property="og:type" content="website">
+  <meta name="twitter:card" content="summary_large_image">
+  <title>Hosts Manager</title>
+  <link rel="icon" href="assets/hosts-manager-icon.png">
+  <link rel="stylesheet" href="styles.css">
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <header class="site-header">
+    <a class="brand" href="#top" aria-label="Hosts Manager home">
+      <img src="assets/hosts-manager-icon.png" alt="" width="36" height="36">
+      <span>Hosts Manager</span>
+    </a>
+    <nav aria-label="Primary">
+      <a href="#features" data-i18n="navFeatures">Features</a>
+      <a href="#security" data-i18n="navSecurity">Security</a>
+      <a href="#build" data-i18n="navBuild">Build</a>
+    </nav>
+    <div class="header-actions">
+      <button class="lang-toggle" type="button" data-lang-target="zh" aria-label="Switch to 中文">中文</button>
+      <a class="button button-primary" href="https://github.com/breeze-ev/hosts-manager" target="_blank" rel="noreferrer">
+        <span data-i18n="github">GitHub</span>
+        <span aria-hidden="true">↗</span>
+      </a>
+    </div>
+  </header>
+
+  <main id="top">
+    <section class="hero">
+      <img class="hero-shot" src="assets/hosts-manager-main.png" alt="" fetchpriority="high">
+      <div class="hero-copy">
+        <p class="eyebrow" data-i18n="eyebrow">Open source macOS hosts manager</p>
+        <h1>Hosts Manager</h1>
+        <p class="hero-lead" data-i18n="heroLead">Manage `/etc/hosts` with profiles, live apply, source editing, and automatic backups.</p>
+        <div class="hero-actions">
+          <a class="button button-primary button-large" href="https://github.com/breeze-ev/hosts-manager" target="_blank" rel="noreferrer">
+            <span data-i18n="viewSource">View Source</span>
+            <span aria-hidden="true">↗</span>
+          </a>
+          <a class="button button-secondary button-large" href="https://github.com/breeze-ev/hosts-manager/releases" target="_blank" rel="noreferrer">
+            <span data-i18n="releases">Releases</span>
+            <span aria-hidden="true">↗</span>
+          </a>
+        </div>
+        <p class="status-note" data-i18n="statusNote">Source is public. A signed DMG will be published when Apple release credentials are ready.</p>
+      </div>
+    </section>
+
+    <section class="band" id="features">
+      <div class="container">
+        <div class="section-head">
+          <p class="eyebrow" data-i18n="featuresEyebrow">Built for daily hosts work</p>
+          <h2 data-i18n="featuresTitle">Profiles instead of manual edits</h2>
+          <p data-i18n="featuresLead">Keep separate hosts configurations, switch quickly, and see exactly what will be written before it happens.</p>
+        </div>
+        <div class="feature-grid">
+          <article class="feature-item">
+            <h3 data-i18n="featureProfiles">Profile switching</h3>
+            <p data-i18n="featureProfilesBody">Enable one profile or combine several enabled profiles into a single written result.</p>
+          </article>
+          <article class="feature-item">
+            <h3 data-i18n="featureLive">Real-time apply</h3>
+            <p data-i18n="featureLiveBody">List edits apply immediately when a profile is enabled, with conflict detection first.</p>
+          </article>
+          <article class="feature-item">
+            <h3 data-i18n="featureSource">Source editing</h3>
+            <p data-i18n="featureSourceBody">Edit hosts text directly with comment and uncomment actions when you need full control.</p>
+          </article>
+          <article class="feature-item">
+            <h3 data-i18n="featureBackups">Automatic backups</h3>
+            <p data-i18n="featureBackupsBody">Every write is backed up first and can be previewed or restored later.</p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section class="band band-alt" id="security">
+      <div class="container">
+        <div class="section-head">
+          <p class="eyebrow" data-i18n="securityEyebrow">Privileged writes, contained</p>
+          <h2 data-i18n="securityTitle">No broad root access</h2>
+          <p data-i18n="securityLead">The helper only accepts a signed Hosts Manager caller from the same signing team and performs one validated write operation.</p>
+        </div>
+        <div class="feature-grid">
+          <article class="feature-item">
+            <h3 data-i18n="securityHelper">Same-team helper</h3>
+            <p data-i18n="securityHelperBody">The background writer validates the caller's signature and bundle identifier before serving requests.</p>
+          </article>
+          <article class="feature-item">
+            <h3 data-i18n="securityAtomic">Atomic writes</h3>
+            <p data-i18n="securityAtomicBody">Hosts content is validated and written atomically while preserving file permissions.</p>
+          </article>
+          <article class="feature-item">
+            <h3 data-i18n="securityPrivacy">No telemetry</h3>
+            <p data-i18n="securityPrivacyBody">No network calls, no analytics, and no third-party SDKs. Everything stays on your Mac.</p>
+          </article>
+          <article class="feature-item">
+            <h3 data-i18n="securityLocal">Local storage</h3>
+            <p data-i18n="securityLocalBody">Profiles and backups live in Application Support and are never uploaded.</p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section class="band" id="build">
+      <div class="container split-row">
+        <div>
+          <p class="eyebrow" data-i18n="buildEyebrow">Requirements</p>
+          <h2 data-i18n="buildTitle">macOS 26+</h2>
+          <p data-i18n="buildBody">Build with Xcode 26.6 or newer. The app and helper use the same signing team for development and distribution.</p>
+        </div>
+        <div class="code-panel" aria-label="Build command">
+          <code>git clone https://github.com/breeze-ev/hosts-manager.git</code>
+          <code>open hosts-manager.xcodeproj</code>
+          <code>xcodebuild -scheme hosts-manager test</code>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <div class="container footer-row">
+      <p>© 2026 Breeze</p>
+      <p><span data-i18n="license">MIT License</span> · <span data-i18n="footerLinks">Privacy · Security · Contributing</span></p>
+    </div>
+  </footer>
+</body>
+</html>

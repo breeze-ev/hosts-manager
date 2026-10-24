@@ -1,0 +1,370 @@
+:root {
+  color-scheme: light dark;
+  --bg: #f6f8fb;
+  --surface: #ffffff;
+  --text: #17202b;
+  --text-muted: #5d6b7a;
+  --border: #dde4ec;
+  --blue: #2469d7;
+  --blue-ink: #173b73;
+  --teal: #0f8f72;
+  --amber: #a2690c;
+  --hero-bg: #0c1118;
+  --hero-text: #f3f7fc;
+  --hero-muted: #a8b6c6;
+  --shadow: 0 18px 42px rgba(24, 39, 58, 0.14);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #10151d;
+    --surface: #171e28;
+    --text: #eef3f8;
+    --text-muted: #9aa9b9;
+    --border: #2c3949;
+    --blue: #5b9bf5;
+    --blue-ink: #b9d6ff;
+    --teal: #4bd2b0;
+    --amber: #f2bc67;
+    --hero-bg: #090d13;
+    --hero-text: #f7fafc;
+    --hero-muted: #b0bfcf;
+    --shadow: 0 18px 42px rgba(0, 0, 0, 0.35);
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Helvetica Neue", sans-serif;
+  letter-spacing: 0;
+  line-height: 1.5;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+.site-header {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 14px 28px;
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--bg) 88%, transparent);
+  backdrop-filter: blur(18px);
+}
+
+.brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-weight: 700;
+}
+
+.brand img {
+  border-radius: 8px;
+}
+
+nav {
+  display: flex;
+  gap: 22px;
+  color: var(--text-muted);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+nav a:hover,
+.header-actions .lang-toggle:hover {
+  color: var(--text);
+}
+
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.lang-toggle {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 7px 12px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.button {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  border-radius: 8px;
+  padding: 9px 15px;
+  font-weight: 650;
+  font-size: 14px;
+}
+
+.button-primary {
+  background: var(--blue);
+  color: #ffffff;
+}
+
+.button-secondary {
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  color: var(--hero-text);
+}
+
+.button-large {
+  padding: 13px 20px;
+  font-size: 15px;
+}
+
+.hero {
+  position: relative;
+  min-height: 78vh;
+  display: flex;
+  align-items: flex-end;
+  overflow: hidden;
+  background: var(--hero-bg);
+  color: var(--hero-text);
+}
+
+.hero-shot {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center 58%;
+  opacity: 0.62;
+  filter: saturate(0.85);
+}
+
+.hero::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, rgba(9, 13, 19, 0.78) 0%, rgba(9, 13, 19, 0.36) 48%, rgba(9, 13, 19, 0.96) 100%);
+}
+
+.hero-copy {
+  position: relative;
+  z-index: 1;
+  width: min(1120px, calc(100% - 48px));
+  margin: 0 auto;
+  padding: 92px 0 72px;
+}
+
+.eyebrow {
+  margin: 0 0 12px;
+  color: var(--blue);
+  font-size: 13px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.hero .eyebrow {
+  color: #78b7ff;
+}
+
+.hero h1 {
+  margin: 0;
+  font-size: clamp(44px, 8vw, 88px);
+  line-height: 0.98;
+  letter-spacing: 0;
+}
+
+.hero-lead {
+  max-width: 660px;
+  margin: 20px 0 28px;
+  color: var(--hero-muted);
+  font-size: 19px;
+}
+
+.hero-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.status-note {
+  margin: 22px 0 0;
+  color: var(--hero-muted);
+  font-size: 13px;
+}
+
+.band {
+  padding: 88px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.band-alt {
+  background: var(--surface);
+}
+
+.container {
+  width: min(1120px, calc(100% - 48px));
+  margin: 0 auto;
+}
+
+.section-head {
+  max-width: 720px;
+  margin-bottom: 40px;
+}
+
+.section-head h2,
+.split-row h2 {
+  margin: 0 0 12px;
+  font-size: 34px;
+  line-height: 1.15;
+  letter-spacing: 0;
+}
+
+.section-head p:last-child {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 17px;
+}
+
+.feature-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.feature-item {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 22px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+.feature-item h3 {
+  margin: 0 0 8px;
+  font-size: 16px;
+}
+
+.feature-item p {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 14px;
+}
+
+.split-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(0, 0.9fr);
+  gap: 48px;
+  align-items: center;
+}
+
+.split-row p {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 17px;
+}
+
+.code-panel {
+  display: grid;
+  gap: 12px;
+  padding: 24px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #101722;
+  color: #dbe7f3;
+  box-shadow: var(--shadow);
+}
+
+.code-panel code {
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 13px;
+  white-space: nowrap;
+  overflow-x: auto;
+}
+
+footer {
+  padding: 32px 0;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.footer-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.footer-row p {
+  margin: 0;
+}
+
+@media (max-width: 900px) {
+  .feature-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .split-row {
+    grid-template-columns: 1fr;
+    gap: 28px;
+  }
+
+  .site-header {
+    padding: 12px 18px;
+  }
+
+  nav {
+    display: none;
+  }
+}
+
+@media (max-width: 560px) {
+  .feature-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .container,
+  .hero-copy {
+    width: calc(100% - 32px);
+  }
+
+  .hero {
+    min-height: 86vh;
+  }
+
+  .hero-copy {
+    padding: 60px 0 48px;
+  }
+
+  .hero-lead {
+    font-size: 17px;
+  }
+
+  .band {
+    padding: 64px 0;
+  }
+
+  .header-actions .button {
+    padding: 8px 11px;
+    font-size: 13px;
+  }
+
+  .footer-row {
+    flex-direction: column;
+  }
+}

@@ -1,15 +1,17 @@
 import Foundation
 
 enum HostsHelperConstants {
-    static let serviceName = "com.breeze.hostsmanager.helper"
-    static let daemonPlistName = "com.breeze.hostsmanager.helper.plist"
-    static let clientBundleIdentifier = "personal.hosts-manager"
-    static let teamIdentifier = "Y724PV6L7L"
-    static let clientCodeRequirement = """
-    anchor apple generic
-    and identifier "\(clientBundleIdentifier)"
-    and certificate leaf[subject.OU] = "\(teamIdentifier)"
-    """
+    static let serviceName = "io.github.breeze-ev.hostsmanager.helper"
+    static let daemonPlistName = "io.github.breeze-ev.hostsmanager.helper.plist"
+    static let clientBundleIdentifier = "io.github.breeze-ev.hostsmanager"
+
+    static func clientCodeRequirement(teamIdentifier: String) -> String {
+        """
+        anchor apple generic
+        and identifier "\(clientBundleIdentifier)"
+        and certificate leaf[subject.OU] = "\(teamIdentifier)"
+        """
+    }
 }
 
 enum HostsHelperErrorCode: Int32 {
