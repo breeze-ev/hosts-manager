@@ -9,6 +9,9 @@ It is currently open source but has not published a signed DMG yet. You can buil
 ## Features
 
 - Profile-based hosts management with one-click switching
+- Combinable management: enable multiple profiles and merge them into one write
+- Import and export profiles
+- Native Swift (SwiftUI + Swift)
 - Structured list editing and raw `/etc/hosts` source editing
 - Conflict and duplicate detection before writes
 - Real-time apply when enabled profiles change
