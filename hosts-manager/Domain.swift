@@ -236,6 +236,12 @@ enum HostsWriter {
         }
 
         HostsHelperClient.registerIfNeeded()
+        guard HostsHelperClient.isRegistered else {
+            throw HostsWriteError.helperUnavailable
+        }
+        guard await HostsHelperClient.ensureResponding() else {
+            throw HostsWriteError.helperUnavailable
+        }
         switch await HostsHelperClient.write(content) {
         case .success:
             return

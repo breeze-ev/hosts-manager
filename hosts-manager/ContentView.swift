@@ -616,32 +616,18 @@ struct ContentView: View {
 
         let others = activeProfiles.filter { $0.id != profile.id }
         let targetProfiles = others + [profile]
+        let originalActive = profile.isActive
+        let originalEnabled = profile.isEnabled
 
         // 打开开关同样遵守冲突检查：与其它已启用配置存在冲突/重复时转入“应用”预览，
         // 让用户先处理，而不是把有冲突的内容静默写入系统。
         if !validationIssues(for: targetProfiles).isEmpty {
-            profile.isEnabled = true
-            profile.updatedAt = Date()
-            do {
-                try context.save()
-            } catch {
-                operationError = localizedError(error)
-                return
-            }
             selection = .profiles
             selectedProfileID = profile.id
             showApply = true
             return
         }
 
-        profile.isEnabled = true
-        profile.updatedAt = Date()
-        do {
-            try context.save()
-        } catch {
-            operationError = localizedError(error)
-            return
-        }
         let content = mergedContent(for: targetProfiles)
         Task {
             do {
@@ -657,6 +643,10 @@ struct ContentView: View {
                 profile.updatedAt = Date()
                 try context.save()
             } catch {
+                profile.isActive = originalActive
+                profile.isEnabled = originalEnabled
+                profile.updatedAt = Date()
+                try? context.save()
                 operationError = localizedError(error)
             }
         }
@@ -689,6 +679,8 @@ struct ContentView: View {
         // 只移除该配置，其它已启用配置的内容继续保留在系统里。
         let remaining = activeProfiles.filter { $0.id != profile.id }
         let content = mergedContent(for: remaining)
+        let originalActive = profile.isActive
+        let originalEnabled = profile.isEnabled
         Task {
             do {
                 let backupURL = try await writeCoordinator.write(content)
@@ -702,6 +694,10 @@ struct ContentView: View {
                 profile.updatedAt = Date()
                 try context.save()
             } catch {
+                profile.isActive = originalActive
+                profile.isEnabled = originalEnabled
+                profile.updatedAt = Date()
+                try? context.save()
                 operationError = localizedError(error)
             }
         }
@@ -3073,6 +3069,8 @@ struct ApplySheet: View {
         guard validationIssues.isEmpty, !writeCoordinator.isWriting else { return }
         captureBaselineIfNeeded()
         phase = .writing
+        let originalActive = profile.isActive
+        let originalEnabled = profile.isEnabled
         Task {
             do {
                 let backupURL = try await writeCoordinator.write(target)
@@ -3085,6 +3083,10 @@ struct ApplySheet: View {
                 sourceDraftCleanup()
                 await MainActor.run { phase = .done }
             } catch {
+                profile.isActive = originalActive
+                profile.isEnabled = originalEnabled
+                profile.updatedAt = Date()
+                try? context.save()
                 await MainActor.run {
                     writeError = localizedError(error)
                     phase = .done

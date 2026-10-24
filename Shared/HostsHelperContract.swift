@@ -1,9 +1,9 @@
 import Foundation
 
 enum HostsHelperConstants {
-    static let serviceName = "io.github.breeze-ev.hostsmanager.helper"
-    static let daemonPlistName = "io.github.breeze-ev.hostsmanager.helper.plist"
-    static let clientBundleIdentifier = "io.github.breeze-ev.hostsmanager"
+    static let serviceName = "com.breeze.hostsmanager.helper"
+    static let daemonPlistName = "com.breeze.hostsmanager.helper.plist"
+    static let clientBundleIdentifier = "personal.hosts-manager"
 
     static func clientCodeRequirement(teamIdentifier: String) -> String {
         """
@@ -26,5 +26,8 @@ enum HostsHelperErrorCode: Int32 {
     func writeHosts(
         _ content: String,
         withReply reply: @escaping (Int32, String?) -> Void
+    )
+    func ping(
+        withReply reply: @escaping (Int32) -> Void
     )
 }

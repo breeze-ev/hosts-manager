@@ -1,7 +1,7 @@
 import Foundation
 import ServiceManagement
 
-enum HostsHelperClientResult {
+enum HostsHelperClientResult: Sendable {
     case success
     case invalidContent
     case writeFailed
@@ -12,6 +12,7 @@ enum HostsHelperClientResult {
 
 enum HostsHelperClient {
     private static let responseTimeout: TimeInterval = 20
+    private static let pingTimeout: TimeInterval = 3
 
     static let serviceName = HostsHelperConstants.serviceName
     static let daemonPlistName = HostsHelperConstants.daemonPlistName
@@ -54,7 +55,7 @@ enum HostsHelperClient {
         if service.status == .enabled {
             return nil
         }
-        if service.status == .requiresApproval {
+        if service.status == .requiresApproval || service.status == .notFound {
             try? service.unregister()
         }
         return register(service, isEnglish: isEnglish)
@@ -70,8 +71,62 @@ enum HostsHelperClient {
     }
 
     static func registerIfNeeded() {
-        guard status == .notRegistered || status == .requiresApproval else { return }
-        try? daemon.register()
+        let service = daemon
+        switch service.status {
+        case .enabled:
+            return
+        case .requiresApproval, .notFound:
+            try? service.unregister()
+        case .notRegistered:
+            break
+        @unknown default:
+            break
+        }
+        try? service.register()
+    }
+
+    /// Re-registers the helper when an existing registration is stale or the
+    /// launchd service no longer resolves inside the current app bundle.
+    static func repair() {
+        let service = daemon
+        try? service.unregister()
+        try? service.register()
+    }
+
+    static func isResponding() async -> Bool {
+        await withCheckedContinuation { (continuation: CheckedContinuation<Bool, Never>) in
+            let gate = XPCReplyGate(continuation)
+            let connection = NSXPCConnection(machServiceName: serviceName)
+            let connectionBox = XPCConnectionBox(connection)
+            connection.remoteObjectInterface = NSXPCInterface(with: HostsHelperServiceProtocol.self)
+            connection.resume()
+            let proxy = connection.remoteObjectProxyWithErrorHandler { _ in
+                connectionBox.invalidate()
+                gate.finish(false)
+            } as? HostsHelperServiceProtocol
+            guard let proxy else {
+                connectionBox.invalidate()
+                gate.finish(false)
+                return
+            }
+            proxy.ping { code in
+                connectionBox.invalidate()
+                gate.finish(code == HostsHelperErrorCode.success.rawValue)
+            }
+            DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + pingTimeout) {
+                connectionBox.invalidate()
+                gate.finish(false)
+            }
+        }
+    }
+
+    static func ensureResponding() async -> Bool {
+        if await isResponding() {
+            return true
+        }
+        repair()
+        guard isRegistered else { return false }
+        return await isResponding()
     }
 
     private static func localizedRegistrationError(_ error: Error, isEnglish: Bool) -> String {
@@ -162,15 +217,15 @@ private final class XPCConnectionBox: @unchecked Sendable {
     }
 }
 
-private final class XPCReplyGate: @unchecked Sendable {
+private final class XPCReplyGate<Result: Sendable>: @unchecked Sendable {
     private let lock = NSLock()
-    nonisolated(unsafe) private var continuation: CheckedContinuation<HostsHelperClientResult, Never>?
+    nonisolated(unsafe) private var continuation: CheckedContinuation<Result, Never>?
 
-    nonisolated init(_ continuation: CheckedContinuation<HostsHelperClientResult, Never>) {
+    nonisolated init(_ continuation: CheckedContinuation<Result, Never>) {
         self.continuation = continuation
     }
 
-    nonisolated func finish(_ result: HostsHelperClientResult) {
+    nonisolated func finish(_ result: Result) {
         lock.lock()
         let continuation = continuation
         self.continuation = nil

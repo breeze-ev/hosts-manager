@@ -2,7 +2,7 @@ import Foundation
 import Security
 
 final class HostsHelperService: NSObject, HostsHelperServiceProtocol {
-    private static let writeQueue = DispatchQueue(label: "io.github.breeze-ev.hostsmanager.helper.write")
+    private static let writeQueue = DispatchQueue(label: "com.breeze.hostsmanager.helper.write")
     private let hostsURL = URL(fileURLWithPath: "/etc/hosts")
 
     func writeHosts(
@@ -19,6 +19,12 @@ final class HostsHelperService: NSObject, HostsHelperServiceProtocol {
                 reply(HostsHelperErrorCode.writeFailed.rawValue, error.localizedDescription)
             }
         }
+    }
+
+    func ping(
+        withReply reply: @escaping (Int32) -> Void
+    ) {
+        reply(HostsHelperErrorCode.success.rawValue)
     }
 }
 
