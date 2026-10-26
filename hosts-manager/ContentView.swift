@@ -91,6 +91,25 @@ private extension View {
     }
 }
 
+private struct RowIconButton: View {
+    let systemName: String
+    let help: String
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: systemName)
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(.secondary)
+                .frame(width: 24, height: 24)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(help)
+        .accessibilityLabel(help)
+    }
+}
+
 struct ProfileSidebarRow: View {
     @ObservedObject var profile: Profile
     let isSelected: Bool
@@ -1668,12 +1687,12 @@ struct EntryRow: View {
 
             flagBadge
 
-            iconActionButton(systemName: "pencil", help: l10n.s("编辑", "Edit")) {
+            RowIconButton(systemName: "pencil", help: l10n.s("编辑", "Edit")) {
                 beginEdit()
             }
             .disabled(entry.isSystem)
 
-            iconActionButton(systemName: "trash", help: l10n.s("删除", "Delete")) {
+            RowIconButton(systemName: "trash", help: l10n.s("删除", "Delete")) {
                 showDeleteConfirm = true
             }
             .disabled(entry.isSystem)
@@ -1691,20 +1710,6 @@ struct EntryRow: View {
                 )
             }
         }
-    }
-
-    private func iconActionButton(systemName: String, help: String, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Image(systemName: systemName)
-                .font(.system(size: 11, weight: .medium))
-                .frame(width: 32, height: 20)
-                .contentShape(Rectangle())
-        }
-        .controlSize(.mini)
-        .buttonBorderShape(.capsule)
-        .buttonStyle(.glass)
-        .frame(width: 32, height: 20)
-        .help(help)
     }
 
     private var editor: some View {
@@ -2637,15 +2642,13 @@ struct BackupRow: View {
             }
             Spacer()
 
-            Button(l10n.s("查看", "View"), systemImage: "eye") {
+            RowIconButton(systemName: "eye", help: l10n.s("查看", "View")) {
                 onView()
             }
-            .buttonStyle(.glass)
 
-            Button(l10n.s("删除", "Delete"), systemImage: "trash") {
+            RowIconButton(systemName: "trash", help: l10n.s("删除", "Delete")) {
                 showDeleteConfirm = true
             }
-            .buttonStyle(.glass)
             .popover(isPresented: $showDeleteConfirm, arrowEdge: .bottom) {
                 ConfirmPopover(
                     title: l10n.s("删除此备份？", "Delete this backup?"),
