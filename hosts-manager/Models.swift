@@ -5,8 +5,10 @@ import Foundation
 public class Profile: NSManagedObject {
     @NSManaged public var id: UUID?
     @NSManaged public var name: String?
+    /// Canonical applied state. `isEnabled` is retained only as a compatibility mirror.
     @NSManaged public var isActive: Bool
     @NSManaged public var isSystem: Bool
+    /// Compatibility mirror of `isActive`; use `setApplied(_:)` to keep both in sync.
     @NSManaged public var isEnabled: Bool
     @NSManaged public var createdAt: Date?
     @NSManaged public var updatedAt: Date?
@@ -52,6 +54,19 @@ public class AppSettings: NSManagedObject {
 }
 
 extension Profile {
+    func setApplied(_ applied: Bool) {
+        isActive = applied
+        isEnabled = applied
+    }
+
+    func synchronizeAppliedMirror() {
+        isEnabled = isActive
+    }
+
+    var isAppliedForSystem: Bool {
+        isActive && isEnabled
+    }
+
     @nonobjc class func fetchRequest() -> NSFetchRequest<Profile> {
         NSFetchRequest<Profile>(entityName: "Profile")
     }

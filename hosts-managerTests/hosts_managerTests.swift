@@ -143,6 +143,47 @@ struct HostValidatorTests {
     }
 }
 
+@MainActor
+struct ProfileAppliedStateTests {
+    @Test func setAppliedKeepsCompatibilityMirrorInSync() throws {
+        let controller = PersistenceController(inMemory: true)
+        #expect(controller.loadError == nil)
+        guard let profile = try controller.container.viewContext
+            .fetch(Profile.fetchRequest())
+            .first(where: { !$0.isSystem }) else {
+            Issue.record("Expected a custom profile")
+            return
+        }
+
+        profile.setApplied(false)
+        #expect(!profile.isActive)
+        #expect(!profile.isEnabled)
+        #expect(!profile.isAppliedForSystem)
+
+        profile.setApplied(true)
+        #expect(profile.isActive)
+        #expect(profile.isEnabled)
+        #expect(profile.isAppliedForSystem)
+    }
+
+    @Test func appliedStateRequiresBothCompatibilityFields() throws {
+        let controller = PersistenceController(inMemory: true)
+        guard let profile = try controller.container.viewContext
+            .fetch(Profile.fetchRequest())
+            .first(where: { !$0.isSystem }) else {
+            Issue.record("Expected a custom profile")
+            return
+        }
+
+        profile.isActive = true
+        profile.isEnabled = false
+        #expect(!profile.isAppliedForSystem)
+
+        profile.synchronizeAppliedMirror()
+        #expect(profile.isAppliedForSystem)
+    }
+}
+
 struct HelperContractTests {
     @Test func xpcInterfaceAndClientRequirementAreConfigured() {
         let interface = NSXPCInterface(with: HostsHelperServiceProtocol.self)
@@ -219,13 +260,14 @@ struct WriteCoordinatorTests {
         let coordinator = HostsWriteCoordinator(access: access, backupDirectory: directory)
         let content = "127.0.0.1 localhost\n10.0.0.1 api.local\n"
 
-        let backupURL = try await coordinator.write(content)
-        #expect(try String(contentsOf: backupURL, encoding: .utf8) == "127.0.0.1 localhost\n")
+        let result = try await coordinator.write(content)
+        #expect(try String(contentsOf: result.backupURL, encoding: .utf8) == "127.0.0.1 localhost\n")
+        #expect(result.content == content)
         #expect(access.content == content)
         #expect(!coordinator.isWriting)
     }
 
-    @Test func rejectsConcurrentWrites() async throws {
+    @Test func queuesConcurrentWritesInsteadOfFailing() async throws {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -233,23 +275,179 @@ struct WriteCoordinatorTests {
 
         let access = DelayedHostsAccess(content: "127.0.0.1 localhost\n")
         let coordinator = HostsWriteCoordinator(access: access, backupDirectory: directory)
-        let content = "127.0.0.1 localhost\n10.0.0.1 api.local\n"
-        let firstWrite = Task { try await coordinator.write(content) }
+        let firstContent = "127.0.0.1 localhost\n10.0.0.1 api.local\n"
+        let secondContent = "127.0.0.1 localhost\n10.0.0.2 db.local\n"
 
+        let firstWrite = Task { try await coordinator.write(firstContent) }
         while !access.started {
             await Task.yield()
         }
 
+        // 第二次写入不再因并发而失败，而是排队执行。
+        let secondResult = try await coordinator.write(secondContent)
+        let firstResult = try await firstWrite.value
+
+        #expect(access.content == secondContent)
+        #expect(firstResult.content == firstContent)
+        #expect(secondResult.content == secondContent)
+        #expect(firstResult.backupURL != secondResult.backupURL)
+        #expect(!coordinator.isWriting)
+    }
+
+    @Test func runsQueuedWritesInOrderWithoutCoalescing() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let access = DelayedHostsAccess(content: "127.0.0.1 localhost\n")
+        let coordinator = HostsWriteCoordinator(access: access, backupDirectory: directory)
+
+        let first = Task { try await coordinator.write("127.0.0.1 localhost\n10.0.0.1 a.local\n") }
+        while !access.started {
+            await Task.yield()
+        }
+        let second = Task { try await coordinator.write("127.0.0.1 localhost\n10.0.0.2 b.local\n") }
+        let third = Task { try await coordinator.write("127.0.0.1 localhost\n10.0.0.3 c.local\n") }
+        // 让排队中的两次写入真正入队。
+        for _ in 0..<4 {
+            await Task.yield()
+        }
+
+        let results = try await [first.value, second.value, third.value]
+
+        // 每次请求都独立执行，最终文件是最后一次请求的内容。
+        #expect(access.content.contains("c.local"))
+        #expect(access.writeCount == 3)
+        #expect(results[0].content.contains("a.local"))
+        #expect(results[1].content.contains("b.local"))
+        #expect(results[2].content.contains("c.local"))
+        #expect(!coordinator.isWriting)
+    }
+
+    @Test func generatesContentAndCommitsAtQueueHead() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let access = DelayedHostsAccess(content: "127.0.0.1 localhost\n")
+        let coordinator = HostsWriteCoordinator(access: access, backupDirectory: directory)
+        var committed: [String] = []
+
+        let first = Task {
+            try await coordinator.perform(
+                makeContent: {
+                    HostsWriteRequest(content: "127.0.0.1 localhost\n10.0.0.1 first.local\n")
+                },
+                commit: { committed.append($0.content) }
+            )
+        }
+        while !access.started {
+            await Task.yield()
+        }
+        let second = Task {
+            try await coordinator.perform(
+                makeContent: {
+                    // Must observe the first operation's commit when it runs.
+                    HostsWriteRequest(content: "127.0.0.1 localhost\n10.0.0.2 \(committed.count).local\n")
+                },
+                commit: { committed.append($0.content) }
+            )
+        }
+
+        _ = try await first.value
+        _ = try await second.value
+        #expect(committed.count == 2)
+        #expect(committed[1].contains("10.0.0.2 1.local"))
+    }
+
+    @Test func reportsCommitFailureAfterFileWasWritten() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let access = InMemoryHostsAccess(content: "127.0.0.1 localhost\n")
+        let coordinator = HostsWriteCoordinator(access: access, backupDirectory: directory)
+        let content = "127.0.0.1 localhost\n10.0.0.9 commit.local\n"
+
         do {
-            _ = try await coordinator.write(content)
-            Issue.record("A concurrent write should not start")
-        } catch HostsWriteError.alreadyInProgress {
+            _ = try await coordinator.perform(
+                makeContent: { HostsWriteRequest(content: content) },
+                commit: { _ in throw CommitTestError() }
+            )
+            Issue.record("Expected a commit error")
+        } catch let error as HostsWriteCommitError {
+            #expect(error.result.content == content)
+            #expect(access.content == content)
+            #expect(!coordinator.isWriting)
         } catch {
             Issue.record("Unexpected error: \(error)")
         }
-        _ = try await firstWrite.value
+    }
+
+    @Test func continuesQueueAfterCommitFailure() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let access = InMemoryHostsAccess(content: "127.0.0.1 localhost\n")
+        let coordinator = HostsWriteCoordinator(access: access, backupDirectory: directory)
+        let first = "127.0.0.1 localhost\n10.0.0.1 first.local\n"
+        let second = "127.0.0.1 localhost\n10.0.0.2 second.local\n"
+
+        do {
+            _ = try await coordinator.perform(
+                makeContent: { HostsWriteRequest(content: first) },
+                commit: { _ in throw CommitTestError() }
+            )
+            Issue.record("Expected the first commit to fail")
+        } catch is HostsWriteCommitError {
+            // Expected: the file is written, but the state transaction failed.
+        }
+
+        let result = try await coordinator.perform(
+            makeContent: { HostsWriteRequest(content: second) },
+            commit: { _ in }
+        )
+        #expect(result.content == second)
+        #expect(access.content == second)
+        #expect(!coordinator.isWriting)
+    }
+
+    @Test func continuesQueueAfterContentGenerationFailure() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let access = InMemoryHostsAccess(content: "127.0.0.1 localhost\n")
+        let coordinator = HostsWriteCoordinator(access: access, backupDirectory: directory)
+        let content = "127.0.0.1 localhost\n10.0.0.3 recovered.local\n"
+
+        do {
+            _ = try await coordinator.perform(
+                makeContent: { throw CommitTestError() },
+                commit: { _ in }
+            )
+            Issue.record("Expected content generation to fail")
+        } catch is CommitTestError {
+            // Expected.
+        }
+
+        let result = try await coordinator.perform(
+            makeContent: { HostsWriteRequest(content: content) },
+            commit: { _ in }
+        )
+        #expect(result.content == content)
+        #expect(access.content == content)
+        #expect(!coordinator.isWriting)
     }
 }
+
+private struct CommitTestError: Error {}
 
 @MainActor
 private final class InMemoryHostsAccess: HostsFileAccess {
@@ -272,6 +470,7 @@ private final class InMemoryHostsAccess: HostsFileAccess {
 private final class DelayedHostsAccess: HostsFileAccess {
     var content: String
     private(set) var started = false
+    private(set) var writeCount = 0
 
     init(content: String) {
         self.content = content
@@ -283,6 +482,7 @@ private final class DelayedHostsAccess: HostsFileAccess {
 
     func write(_ content: String) async throws {
         started = true
+        writeCount += 1
         try await Task.sleep(for: .milliseconds(50))
         self.content = content
     }
@@ -331,6 +531,28 @@ struct PersistenceTests {
         try controller.container.viewContext.save()
         try controller.ensureDefaults()
         #expect(custom.lastActivatedAt != nil)
+    }
+
+    @Test func ensureDefaultsSyncsToggleWithAppliedState() throws {
+        // 开关（isEnabled）表示“已写入系统”，必须与 isActive 一致：
+        // 旧数据里新建/导入出来的配置是 isEnabled = true 但从未写入。
+        let controller = PersistenceController(inMemory: true)
+        #expect(controller.loadError == nil)
+
+        let context = controller.container.viewContext
+        let profiles = try context.fetch(Profile.fetchRequest())
+        guard let custom = profiles.first(where: { !$0.isSystem }) else {
+            Issue.record("Expected a custom profile to exist")
+            return
+        }
+        custom.isActive = false
+        custom.isEnabled = true
+        try context.save()
+
+        try controller.ensureDefaults()
+
+        #expect(custom.isEnabled == false)
+        #expect(custom.isEnabled == custom.isActive)
     }
 
     @Test func seededDefaultEntriesAreDisabled() throws {

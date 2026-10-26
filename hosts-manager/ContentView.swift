@@ -22,6 +22,60 @@ enum EntryMode: String, CaseIterable {
     case list, source
 }
 
+private struct HostsWriteConflictError: Error {
+    let profileID: UUID
+}
+
+private struct HostsWriteAbortedError: Error {}
+
+@MainActor
+private func markProfilesApplied(_ profiles: [Profile]) {
+    for profile in profiles where !profile.isDeleted {
+        guard !profile.isAppliedForSystem else { continue }
+        profile.setApplied(true)
+        profile.updatedAt = Date()
+    }
+}
+
+/// Commits the backup record and profile state in one Core Data transaction.
+/// The hosts file has already been written when this runs. If the transaction
+/// fails, roll back the in-memory changes and surface the original error so the
+/// caller can report "file written, state not saved" instead of claiming the
+/// write itself failed.
+@MainActor
+private func commitHostsWrite(
+    result: HostsWriteResult,
+    context: NSManagedObjectContext,
+    profileName: String?,
+    note: String,
+    stateChanges: () throws -> Void
+) throws {
+    let record = BackupRecord(context: context)
+    record.id = UUID()
+    record.timestamp = Date()
+    record.filePath = result.backupURL.path
+    record.profileName = profileName
+    record.note = note
+
+    do {
+        try stateChanges()
+        try context.save()
+    } catch {
+        context.rollback()
+        throw error
+    }
+
+    // Retention cleanup is not part of the write transaction. A cleanup
+    // failure must not turn a successfully committed write into a failure.
+    do {
+        try BackupMaintenance.prune(context: context)
+    } catch {
+        // prune may have queued record deletions before its save failed.
+        // Never leave those deletions to be committed by an unrelated save.
+        context.rollback()
+    }
+}
+
 private extension View {
     func zebraRowBackground(_ index: Int) -> some View {
         let systemColors = NSColor.alternatingContentBackgroundColors
@@ -41,7 +95,6 @@ struct ProfileSidebarRow: View {
     @ObservedObject var profile: Profile
     let isSelected: Bool
     let onSelect: () -> Void
-    let onToggle: (Bool) -> Void
     let onEnableActive: () -> Void
     let onDisableActive: () -> Void
     let onDelete: () -> Void
@@ -105,14 +158,13 @@ struct ProfileSidebarRow: View {
 
                 if !profile.isSystem {
                     Toggle("", isOn: Binding(
-                        get: { profile.isEnabled },
+                        get: { profile.isAppliedForSystem },
                         set: { newValue in
-                            if !newValue && profile.isActive {
-                                showDisableConfirm = true
-                            } else if newValue && !profile.isActive {
+                            if newValue {
+                                guard !profile.isAppliedForSystem else { return }
                                 onEnableActive()
-                            } else {
-                                onToggle(newValue)
+                            } else if profile.isAppliedForSystem {
+                                showDisableConfirm = true
                             }
                         }
                     ))
@@ -146,7 +198,7 @@ struct ProfileSidebarRow: View {
                 .fill(isSelected ? Color.accentColor.opacity(0.18) : .clear)
         )
         .contentShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
-        .opacity(isRenaming ? 1 : (profile.isEnabled ? 1 : 0.45))
+        .opacity(isRenaming || profile.isSystem || profile.isAppliedForSystem ? 1 : 0.45)
         .contextMenu {
             if !profile.isSystem {
                 Button(l10n.s("重命名", "Rename")) {
@@ -197,6 +249,7 @@ struct ProfileSidebarRow: View {
             try context.save()
             cancelRename()
         } catch {
+            context.rollback()
             renameError = error.localizedDescription
         }
     }
@@ -219,15 +272,20 @@ struct ContentView: View {
     @State private var showApply = false
     @State private var query = ""
     @State private var sourceDrafts: [UUID: String] = [:]
+    /// 源码草稿与列表内容发生冲突的配置：草稿不会被静默丢弃，而是标记出来让用户决定。
+    @State private var conflictingDrafts: Set<UUID> = []
+    /// 同一配置再次编辑时递增；实时任务在真正写盘前核对，旧快照不能覆盖新编辑。
+    @State private var realtimeApplyRevisions: [UUID: Int] = [:]
     @State private var operationError: String?
     @State private var showHelperGuide = false
-    @State private var realtimeApplyTask: Task<Void, Never>?
+    /// 每个配置独立防抖，避免编辑 A 后紧接着编辑 B 时取消 A 的落盘任务。
+    @State private var realtimeApplyTasks: [UUID: Task<Void, Never>] = [:]
     @State private var pendingScrollProfileID: UUID?
     @StateObject private var writeCoordinator = HostsWriteCoordinator.shared
 
     private var selectedProfile: Profile? {
         if let id = selectedProfileID, let p = profiles.first(where: { $0.id == id }) { return p }
-        if let active = profiles.first(where: \.isActive) { return active }
+        if let active = profiles.first(where: \.isAppliedForSystem) { return active }
         return profiles.first(where: { !$0.isSystem }) ?? profiles.first
     }
 
@@ -287,14 +345,23 @@ struct ContentView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .sourceDraftApplied)) { notification in
             if let profileID = notification.object as? UUID {
+                realtimeApplyTasks[profileID]?.cancel()
+                realtimeApplyTasks.removeValue(forKey: profileID)
+                realtimeApplyRevisions.removeValue(forKey: profileID)
                 sourceDrafts.removeValue(forKey: profileID)
+                conflictingDrafts.remove(profileID)
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .profileEntriesChanged)) { notification in
             if let profileID = notification.object as? UUID {
-                sourceDrafts.removeValue(forKey: profileID)
-                // 列表视图是实时应用：条目一旦变动，立即把已启用配置的并集写回系统。
-                if let profile = profiles.first(where: { $0.id == profileID }), profile.isEnabled {
+                // 列表改动已经落库。若此时还留着源码草稿，不能直接删掉（会静默丢失
+                // 用户未应用的编辑），而是标记冲突，交给用户决定以哪边为准。
+                if sourceDrafts[profileID] != nil {
+                    conflictingDrafts.insert(profileID)
+                }
+                // 已应用配置的列表改动要实时写回系统；未应用配置只改库。
+                if let profile = profiles.first(where: { $0.id == profileID }),
+                   profile.isAppliedForSystem {
                     scheduleRealtimeApply(for: profile)
                 }
             }
@@ -319,9 +386,6 @@ struct ContentView: View {
                         onSelect: {
                             selection = .profiles
                             selectedProfileID = profile.id
-                        },
-                        onToggle: { newValue in
-                            setProfileEnabled(profile, enabled: newValue)
                         },
                         onEnableActive: {
                             enableProfile(profile)
@@ -423,7 +487,9 @@ struct ContentView: View {
                     query: $query,
                     sourceText: sourceBinding(for: profile),
                     isSourceDirty: profile.id.map { sourceDrafts[$0] != nil } ?? false,
-                    onApply: { applyProfile(profile) }
+                    hasDraftConflict: profile.id.map { conflictingDrafts.contains($0) } ?? false,
+                    onApply: { applyProfile(profile) },
+                    onDiscardDraft: { discardSourceDraft(for: profile) }
                 )
                     .id(profile.id)
             } else {
@@ -485,13 +551,14 @@ struct ContentView: View {
         let profile = Profile(context: context)
         profile.id = UUID()
         profile.name = l10n.s("新配置", "New Profile")
-        profile.isActive = false
-        profile.isEnabled = true
+        // 新配置还没有写入 /etc/hosts，开关必须是关闭的：打开开关才代表“已生效”。
+        profile.setApplied(false)
         profile.createdAt = Date()
         profile.updatedAt = Date()
         do {
             try context.save()
         } catch {
+            context.rollback()
             operationError = localizedError(error)
             return
         }
@@ -501,25 +568,33 @@ struct ContentView: View {
     }
 
     private func deleteProfile(_ profile: Profile) {
-        guard !profile.isActive else {
+        guard !profile.isAppliedForSystem else {
             operationError = l10n.s(
                 "请先停用当前配置，再删除它。",
                 "Disable the active profile before deleting it."
             )
             return
         }
+        // 先取 id：对象删除并保存之后再去读属性是不可靠的。
+        let profileID = profile.id
+        let wasSelected = selectedProfileID == profileID
         context.delete(profile)
         do {
             try context.save()
         } catch {
+            context.rollback()
             operationError = localizedError(error)
             return
         }
-        if let profileID = profile.id {
+        if let profileID {
+            realtimeApplyTasks[profileID]?.cancel()
+            realtimeApplyTasks.removeValue(forKey: profileID)
+            realtimeApplyRevisions.removeValue(forKey: profileID)
             sourceDrafts.removeValue(forKey: profileID)
+            conflictingDrafts.remove(profileID)
         }
-        if selectedProfileID == profile.id {
-            selectedProfileID = profiles.first(where: { $0 !== profile })?.id
+        if wasSelected {
+            selectedProfileID = profiles.first(where: { $0.id != profileID })?.id
         }
     }
 
@@ -528,7 +603,11 @@ struct ContentView: View {
         guard mode == .source, let profile = target ?? selectedProfile, !profile.isSystem else {
             return true
         }
-        let draft = sourceText(for: profile)
+        // 没有草稿就什么都不用做。旧实现会把“重新生成的文本”当作草稿整体删库重建，
+        // 等于顺手重写了一个用户根本没有编辑过的配置（id 全变、描述被本地化写回）。
+        guard let profileID = profile.id, let draft = sourceDrafts[profileID] else {
+            return true
+        }
         if HostsValueValidator.validate(content: draft) != nil {
             operationError = l10n.s(
                 "内容包含无效的 IP、主机名或控制字符。",
@@ -557,13 +636,22 @@ struct ContentView: View {
         do {
             try context.save()
         } catch {
+            // 上面的删除已经发生在上下文里。不回滚的话，下一次任意一次保存
+            // （备份记录、清理旧备份等）都会把“删除全部条目”提交掉。
+            context.rollback()
             operationError = localizedError(error)
             return false
         }
-        if let profileID = profile.id {
-            sourceDrafts[profileID] = draft
-        }
+        sourceDrafts[profileID] = draft
+        conflictingDrafts.remove(profileID)
         return true
+    }
+
+    /// 放弃源码草稿，回到数据库里的内容。只在用户明确点击时调用。
+    private func discardSourceDraft(for profile: Profile) {
+        guard let profileID = profile.id else { return }
+        sourceDrafts.removeValue(forKey: profileID)
+        conflictingDrafts.remove(profileID)
     }
 
     private func applyAppearance() {
@@ -596,7 +684,7 @@ struct ContentView: View {
     }
 
     private var activeProfiles: [Profile] {
-        profiles.filter { $0.isActive && !$0.isSystem }
+        profiles.filter(\.isAppliedForSystem)
     }
 
     private func mergedContent(for profiles: [Profile]) -> String {
@@ -607,54 +695,66 @@ struct ContentView: View {
         HostValidator.issues(entries: profiles.flatMap(parsedEntries(for:)).filter(\.isEnabled))
     }
 
+    private func hasWriteConflict(in profiles: [Profile]) -> Bool {
+        validationIssues(for: profiles).contains { $0.kind == .conflict }
+    }
+
     // 配置开关 = 系统内容总开关：打开立即把该配置已启用的条目并入 /etc/hosts，
     // 关闭则只移除该配置。可同时启用多条配置，写入内容是它们已启用条目的并集。
     // 应用（Apply）是带预览和冲突检查的重新同步入口。
+    // 开关的“开”必须等于“已写入系统”，因此新建 / 导入 / 复制的配置默认是关闭的。
     private func enableProfile(_ profile: Profile) {
-        guard !profile.isSystem, !writeCoordinator.isWriting else { return }
+        guard !profile.isSystem else { return }
         guard saveSourceIfNeeded(for: profile) else { return }
 
-        let others = activeProfiles.filter { $0.id != profile.id }
-        let targetProfiles = others + [profile]
-        let originalActive = profile.isActive
-        let originalEnabled = profile.isEnabled
-
-        // 打开开关同样遵守冲突检查：与其它已启用配置存在冲突/重复时转入“应用”预览，
-        // 让用户先处理，而不是把有冲突的内容静默写入系统。
-        if !validationIssues(for: targetProfiles).isEmpty {
+        // 只有真正的主机名/IP 冲突需要阻断；完全重复项由合并管线自动去重。
+        let initialTargets = activeProfiles.filter { $0.id != profile.id } + [profile]
+        if hasWriteConflict(in: initialTargets) {
             selection = .profiles
             selectedProfileID = profile.id
             showApply = true
             return
         }
 
-        let content = mergedContent(for: targetProfiles)
         Task {
             do {
-                let backupURL = try await writeCoordinator.write(content)
-                recordBackup(
-                    at: backupURL,
-                    profileName: profile.localizedName(isEnglish: l10n.isEnglish),
-                    note: l10n.s("启用配置前自动备份", "Auto backup before enabling profile")
-                )
-                profile.isActive = true
-                profile.isEnabled = true
-                profile.lastActivatedAt = Date()
-                profile.updatedAt = Date()
-                try context.save()
+                var appliedProfiles: [Profile] = []
+                _ = try await writeCoordinator.perform(makeContent: {
+                    // Re-read active profiles when this operation reaches the
+                    // queue head. A preceding queued operation may have changed
+                    // the active set since the button was pressed.
+                    let targets = self.activeProfiles.filter { $0.id != profile.id } + [profile]
+                    if self.hasWriteConflict(in: targets) {
+                        guard let profileID = profile.id else { throw HostsWriteAbortedError() }
+                        throw HostsWriteConflictError(profileID: profileID)
+                    }
+                    appliedProfiles = targets
+                    return HostsWriteRequest(content: self.mergedContent(for: targets))
+                }, commit: { result in
+                    try commitHostsWrite(
+                        result: result,
+                        context: context,
+                        profileName: profile.localizedName(isEnglish: l10n.isEnglish),
+                        note: l10n.s("启用配置前自动备份", "Auto backup before enabling profile")
+                    ) {
+                        markProfilesApplied(appliedProfiles)
+                        profile.setApplied(true)
+                        profile.lastActivatedAt = Date()
+                        profile.updatedAt = Date()
+                    }
+                })
+                scheduleRealtimeApplyIfSystemIsStale()
             } catch {
-                profile.isActive = originalActive
-                profile.isEnabled = originalEnabled
-                profile.updatedAt = Date()
-                try? context.save()
-                operationError = localizedError(error)
+                handleWriteFailure(error, profile: profile, context: context)
             }
         }
     }
 
     @discardableResult
     private func applyProfile(_ profile: Profile) -> Bool {
-        guard !profile.isSystem, profile.isEnabled, !writeCoordinator.isWriting else { return false }
+        // 未启用的配置也允许“应用”：应用本身就是带预览的启用流程，
+        // 确认写入后会同时把开关打开。
+        guard !profile.isSystem else { return false }
         guard saveSourceIfNeeded(for: profile) else { return false }
         selection = .profiles
         selectedProfileID = profile.id
@@ -662,93 +762,120 @@ struct ContentView: View {
         return true
     }
 
-    private func setProfileEnabled(_ profile: Profile, enabled: Bool) {
-        if !enabled && profile.isActive {
-            return
-        }
-        profile.isEnabled = enabled
-        profile.updatedAt = Date()
-        do {
-            try context.save()
-        } catch {
-            operationError = localizedError(error)
-        }
-    }
-
     private func disableActiveProfile(_ profile: Profile) {
-        // 只移除该配置，其它已启用配置的内容继续保留在系统里。
-        let remaining = activeProfiles.filter { $0.id != profile.id }
-        let content = mergedContent(for: remaining)
-        let originalActive = profile.isActive
-        let originalEnabled = profile.isEnabled
         Task {
             do {
-                let backupURL = try await writeCoordinator.write(content)
-                recordBackup(
-                    at: backupURL,
-                    profileName: profile.localizedName(isEnglish: l10n.isEnglish),
-                    note: l10n.s("停用当前配置前自动备份", "Auto backup before disabling the active profile")
-                )
-                profile.isActive = false
-                profile.isEnabled = false
-                profile.updatedAt = Date()
-                try context.save()
+                _ = try await writeCoordinator.perform(makeContent: {
+                    // Only remove this profile; other active profiles stay.
+                    let remaining = self.activeProfiles.filter { $0.id != profile.id }
+                    // The switch may have been turned on while an earlier queued
+                    // write was still running, then immediately turned off. We
+                    // still need to write the current remaining set because the
+                    // earlier write may have applied this profile.
+                    return HostsWriteRequest(content: self.mergedContent(for: remaining))
+                }, commit: { result in
+                    try commitHostsWrite(
+                        result: result,
+                        context: context,
+                        profileName: profile.localizedName(isEnglish: l10n.isEnglish),
+                        note: l10n.s("停用当前配置前自动备份", "Auto backup before disabling the active profile")
+                    ) {
+                        profile.setApplied(false)
+                        profile.updatedAt = Date()
+                    }
+                })
+                scheduleRealtimeApplyIfSystemIsStale()
             } catch {
-                profile.isActive = originalActive
-                profile.isEnabled = originalEnabled
-                profile.updatedAt = Date()
-                try? context.save()
-                operationError = localizedError(error)
+                handleWriteFailure(error, profile: profile, context: context)
             }
         }
     }
 
     /// 列表视图实时应用：条目变动后把已启用配置的并集立即写回 /etc/hosts。
-    /// 用短暂防抖合并连续操作，避免频繁触发特权写入。
+    /// 用短暂防抖合并连续操作；写入本身由 HostsWriteCoordinator 串行排队，
+    /// 这里不再判断/重试 isWriting。
     private func scheduleRealtimeApply(for profile: Profile) {
-        realtimeApplyTask?.cancel()
-        realtimeApplyTask = Task {
-            try? await Task.sleep(for: .milliseconds(250))
-            guard !Task.isCancelled else { return }
-            applyActiveProfilesToSystem(after: profile)
+        guard let profileID = profile.id else { return }
+        let revision = realtimeApplyRevisions[profileID, default: 0] + 1
+        realtimeApplyRevisions[profileID] = revision
+        let existing = realtimeApplyTasks[profileID]
+        realtimeApplyTasks[profileID] = Task { @MainActor in
+            defer {
+                if realtimeApplyRevisions[profileID] == revision {
+                    realtimeApplyTasks.removeValue(forKey: profileID)
+                    realtimeApplyRevisions.removeValue(forKey: profileID)
+                }
+            }
+            // If an earlier realtime write already started, let it finish without
+            // cancelling it; this task will then perform a follow-up write with
+            // the latest database contents.
+            _ = await existing?.value
+            guard !Task.isCancelled,
+                  realtimeApplyRevisions[profileID] == revision else {
+                return
+            }
+            do {
+                try await Task.sleep(for: .milliseconds(250))
+            } catch {
+                return
+            }
+            guard !Task.isCancelled,
+                  realtimeApplyRevisions[profileID] == revision,
+                  let current = profiles.first(where: { $0.id == profileID }),
+                  !current.isDeleted else {
+                return
+            }
+            realtimeApplyTasks.removeValue(forKey: profileID)
+            applyActiveProfilesToSystem(for: current)
         }
     }
 
-    private func applyActiveProfilesToSystem(after profile: Profile) {
-        guard profile.isEnabled else { return }
-        var targets = activeProfiles
-        if !targets.contains(where: { $0.id == profile.id }) {
-            targets.append(profile)
-        }
-        guard !targets.isEmpty else { return }
-        if writeCoordinator.isWriting {
-            // 有写入在进行时稍后重试，保证最后一次编辑也会落盘。
-            scheduleRealtimeApply(for: profile)
+    private func scheduleRealtimeApplyIfSystemIsStale() {
+        let active = activeProfiles
+        guard let first = active.first else { return }
+        let expected = mergedContent(for: active)
+        if (try? HostsWriter.readContent()) == expected {
             return
         }
-        if !validationIssues(for: targets).isEmpty {
-            operationError = l10n.s(
-                "存在主机名冲突，未写入系统。",
-                "Conflicting hostnames were found; not written to the system."
-            )
-            return
-        }
-        let content = mergedContent(for: targets)
+        scheduleRealtimeApply(for: first)
+    }
+
+    private func applyActiveProfilesToSystem(for profile: Profile) {
+        // 开关打开才代表“该配置属于系统内容”。关闭的配置列表编辑后只改库，
+        // 不会被静默带进 /etc/hosts。
+        guard !profile.isSystem else { return }
+        guard profile.isAppliedForSystem else { return }
         Task {
             do {
-                let backupURL = try await writeCoordinator.write(content)
-                recordBackup(
-                    at: backupURL,
-                    profileName: profile.localizedName(isEnglish: l10n.isEnglish),
-                    note: l10n.s("列表编辑后实时应用", "Real-time apply after list edit")
-                )
-                profile.isActive = true
-                profile.isEnabled = true
-                profile.lastActivatedAt = Date()
-                profile.updatedAt = Date()
-                try context.save()
+                var appliedProfiles: [Profile] = []
+                _ = try await writeCoordinator.perform(makeContent: {
+                    var targets = self.activeProfiles
+                    if !targets.contains(where: { $0.id == profile.id }) {
+                        targets.append(profile)
+                    }
+                    guard !targets.isEmpty else { throw HostsWriteAbortedError() }
+                    if self.hasWriteConflict(in: targets) {
+                        guard let profileID = profile.id else { throw HostsWriteAbortedError() }
+                        throw HostsWriteConflictError(profileID: profileID)
+                    }
+                    appliedProfiles = targets
+                    return HostsWriteRequest(content: self.mergedContent(for: targets))
+                }, commit: { result in
+                    try commitHostsWrite(
+                        result: result,
+                        context: context,
+                        profileName: profile.localizedName(isEnglish: l10n.isEnglish),
+                        note: l10n.s("列表编辑后实时应用", "Real-time apply after list edit")
+                    ) {
+                        markProfilesApplied(appliedProfiles)
+                        profile.setApplied(true)
+                        profile.lastActivatedAt = Date()
+                        profile.updatedAt = Date()
+                    }
+                })
+                scheduleRealtimeApplyIfSystemIsStale()
             } catch {
-                operationError = localizedError(error)
+                handleWriteFailure(error, profile: profile, context: context)
             }
         }
     }
@@ -783,10 +910,10 @@ struct ContentView: View {
     }
 
     private func importCurrentHosts() {
+        let profile = Profile(context: context)
         do {
             let content = try HostsWriter.readContent()
             let entries = HostsParser.parse(content).filter { !$0.isSystem }
-            let profile = Profile(context: context)
             profile.id = UUID()
             let formatter = DateFormatter()
             formatter.dateFormat = "yyyy-MM-dd HHmm"
@@ -794,8 +921,7 @@ struct ContentView: View {
                 "导入 \(formatter.string(from: Date()))",
                 "Imported \(formatter.string(from: Date()))"
             )
-            profile.isActive = false
-            profile.isEnabled = true
+            profile.setApplied(false)
             profile.createdAt = Date()
             profile.updatedAt = Date()
             addEntries(entries, to: profile)
@@ -803,6 +929,7 @@ struct ContentView: View {
             selectedProfileID = profile.id
             selection = .profiles
         } catch {
+            context.rollback()
             operationError = localizedError(error)
         }
     }
@@ -813,8 +940,8 @@ struct ContentView: View {
         profile.id = UUID()
         let sourceName = source.localizedName(isEnglish: l10n.isEnglish)
         profile.name = l10n.s("\(sourceName) 副本", "\(sourceName) Copy")
-        profile.isActive = false
-        profile.isEnabled = source.isEnabled
+        // 副本没有写入系统，开关保持关闭，避免“开关已开但系统里没有内容”。
+        profile.setApplied(false)
         profile.createdAt = Date()
         profile.updatedAt = Date()
         let entries = source.sortedEntries.map {
@@ -831,6 +958,7 @@ struct ContentView: View {
             try context.save()
             selectedProfileID = profile.id
         } catch {
+            context.rollback()
             operationError = localizedError(error)
         }
     }
@@ -863,22 +991,47 @@ struct ContentView: View {
         }
     }
 
-    private func recordBackup(at url: URL, profileName: String?, note: String) {
-        let record = BackupRecord(context: context)
-        record.id = UUID()
-        record.timestamp = Date()
-        record.filePath = url.path
-        record.profileName = profileName
-        record.note = note
-        do {
-            try context.save()
-            try BackupMaintenance.prune(context: context)
-        } catch {
-            operationError = localizedError(error)
+    private func handleWriteFailure(_ error: Error, profile: Profile, context: NSManagedObjectContext) {
+        if let conflict = error as? HostsWriteConflictError {
+            if conflict.profileID == profile.id {
+                selection = .profiles
+                selectedProfileID = profile.id
+                showApply = true
+            }
+            return
         }
+        if error is HostsWriteAbortedError {
+            return
+        }
+        if let commitError = error as? HostsWriteCommitError {
+            operationError = l10n.s(
+                "/etc/hosts 已写入，但配置状态保存失败。请检查磁盘空间后重试同步。\n\(commitError.underlying.localizedDescription)",
+                "/etc/hosts was written, but the profile state could not be saved. Check available disk space and resync.\n\(commitError.underlying.localizedDescription)"
+            )
+            return
+        }
+        operationError = localizedError(error)
     }
 
     private func localizedError(_ error: Error) -> String {
+        if error is HostsWriteConflictError {
+            return l10n.s(
+                "配置与其它已启用配置存在主机名冲突，未写入系统。",
+                "The profile conflicts with another active profile; nothing was written."
+            )
+        }
+        if error is HostsWriteAbortedError {
+            return l10n.s(
+                "写入已取消，配置状态未变更。",
+                "The write was cancelled; profile state was not changed."
+            )
+        }
+        if let commitError = error as? HostsWriteCommitError {
+            return l10n.s(
+                "/etc/hosts 已写入，但配置状态保存失败。请检查磁盘空间后重试同步。\n\(commitError.underlying.localizedDescription)",
+                "/etc/hosts was written, but the profile state could not be saved. Check available disk space and resync.\n\(commitError.underlying.localizedDescription)"
+            )
+        }
         if let writeError = error as? HostsWriteError {
             switch writeError {
             case .invalidContent(_):
@@ -901,8 +1054,6 @@ struct ContentView: View {
                 return l10n.s("写入后校验失败，请检查 hosts 文件。", "Verification failed after writing /etc/hosts.")
             case .timedOut:
                 return l10n.s("后台写入助手响应超时。", "The background writer helper timed out.")
-            case .alreadyInProgress:
-                return l10n.s("已有写入任务正在进行。", "Another write is already in progress.")
             }
         }
         return error.localizedDescription
@@ -958,9 +1109,8 @@ struct ProfileRow: View {
 
     private var meta: String {
         if profile.isSystem { return l10n.s("系统只读", "System") }
-        if !profile.isEnabled { return l10n.s("已停用", "Disabled") }
+        if !profile.isAppliedForSystem { return l10n.s("已停用", "Disabled") }
         let on = profile.sortedEntries.filter(\.isEnabled).count
-        if !profile.isActive { return l10n.s("未应用 · \(on) 条启用", "Not applied · \(on) enabled") }
         return l10n.s("已应用 · \(on) 条启用", "Applied · \(on) enabled")
     }
 }
@@ -995,7 +1145,9 @@ struct ProfileDetailView: View {
     @Binding var query: String
     @Binding var sourceText: String
     let isSourceDirty: Bool
+    let hasDraftConflict: Bool
     let onApply: () -> Void
+    let onDiscardDraft: () -> Void
     @Environment(\.managedObjectContext) private var context
     @EnvironmentObject private var l10n: Localization
     @State private var isAdding = false
@@ -1012,22 +1164,16 @@ struct ProfileDetailView: View {
                     profile: profile,
                     text: $sourceText,
                     isDirty: isSourceDirty,
+                    hasDraftConflict: hasDraftConflict,
                     onApply: onApply,
+                    onDiscardDraft: onDiscardDraft,
                     toolbarQuery: query
                 )
             }
         }
         .padding(22)
-        .onAppear {
-            if sourceText.isEmpty {
-                sourceText = localizedSourceText(for: profile, isEnglish: l10n.isEnglish)
-            }
-        }
-        .onChange(of: mode) { _, newMode in
-            if newMode == .source && sourceText.isEmpty {
-                sourceText = localizedSourceText(for: profile, isEnglish: l10n.isEnglish)
-            }
-        }
+        // 不再在出现/切模式时往草稿里写初始文本：sourceText 的 getter 已经会返回
+        // 生成好的内容，写入反而会让空配置凭空变成“未应用”状态。
     }
 
     private var header: some View {
@@ -1066,7 +1212,7 @@ struct ProfileDetailView: View {
                 .background(Capsule().fill(.ultraThinMaterial))
                 .overlay(Capsule().stroke(.quaternary))
                 .foregroundStyle(.secondary)
-        } else if profile.isActive {
+        } else if profile.isAppliedForSystem {
             Text(l10n.s("当前", "Active"))
                 .font(.system(size: 11.5, weight: .semibold))
                 .padding(.horizontal, 9)
@@ -1428,6 +1574,7 @@ struct EntriesListView: View {
             draftEnabled = true
             draftError = nil
         } catch {
+            context.rollback()
             draftError = error.localizedDescription
         }
     }
@@ -1477,7 +1624,6 @@ struct EntryRow: View {
             Toggle("", isOn: Binding(
                 get: { entry.isEnabled },
                 set: { newValue in
-                    let previous = entry.isEnabled
                     entry.isEnabled = newValue
                     do {
                         try context.save()
@@ -1485,7 +1631,7 @@ struct EntryRow: View {
                             NotificationCenter.default.post(name: .profileEntriesChanged, object: profileID)
                         }
                     } catch {
-                        entry.isEnabled = previous
+                        context.rollback()
                         saveError = error.localizedDescription
                     }
                 }
@@ -1658,6 +1804,7 @@ struct EntryRow: View {
             }
             onEndEdit()
         } catch {
+            context.rollback()
             saveError = error.localizedDescription
         }
     }
@@ -1672,6 +1819,7 @@ struct EntryRow: View {
                 NotificationCenter.default.post(name: .profileEntriesChanged, object: profileID)
             }
         } catch {
+            context.rollback()
             saveError = error.localizedDescription
         }
     }
@@ -2138,7 +2286,9 @@ struct SourceEditorView: View {
     @ObservedObject var profile: Profile
     @Binding var text: String
     let isDirty: Bool
+    let hasDraftConflict: Bool
     let onApply: () -> Void
+    let onDiscardDraft: () -> Void
     let toolbarQuery: String
     @Environment(\.managedObjectContext) private var context
     @EnvironmentObject private var l10n: Localization
@@ -2160,7 +2310,26 @@ struct SourceEditorView: View {
                         .font(.system(size: 11, weight: .semibold))
                         .foregroundStyle(.orange)
                 }
+                if hasDraftConflict {
+                    Label(l10n.s("列表已变更", "List changed"), systemImage: "exclamationmark.triangle.fill")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(.orange)
+                        .help(l10n.s(
+                            "编辑源码期间列表内容被修改过。点击“应用”以源码为准写入，或点击“放弃修改”丢弃草稿。",
+                            "The list was changed while you were editing. Apply to keep the source text, or discard your draft."
+                        ))
+                }
                 Spacer()
+                if isDirty {
+                    Button(l10n.s("放弃修改", "Discard")) {
+                        onDiscardDraft()
+                    }
+                    .buttonStyle(.glass)
+                    .help(l10n.s(
+                        "丢弃当前源码草稿，恢复为已保存的内容。",
+                        "Discard the current source draft and restore the saved content."
+                    ))
+                }
                 if validationMessage == nil {
                     Label(l10n.s("校验通过", "Valid"), systemImage: "checkmark.circle.fill")
                         .font(.system(size: 11.5, weight: .semibold))
@@ -2191,7 +2360,7 @@ struct SourceEditorView: View {
                     Label(l10n.s("应用", "Apply"), systemImage: "checkmark.circle")
                 }
                 .buttonStyle(.glassProminent)
-                .disabled(validationMessage != nil || !profile.isEnabled)
+                .disabled(validationMessage != nil)
                 .accessibilityIdentifier("apply-profile-button")
                 .help(l10n.s("预览后写入 /etc/hosts", "Preview, then write to /etc/hosts"))
             }
@@ -2334,6 +2503,7 @@ struct BackupsView: View {
             do {
                 try BackupMaintenance.prune(context: context)
             } catch {
+                context.rollback()
                 restoreMessage = error.localizedDescription
             }
         }
@@ -2370,8 +2540,7 @@ struct BackupsView: View {
                 "从备份恢复 \(Date().formatted(date: .abbreviated, time: .shortened))",
                 "Restored \(Date().formatted(date: .abbreviated, time: .shortened))"
             )
-            profile.isActive = false
-            profile.isEnabled = true
+            profile.setApplied(false)
             profile.createdAt = Date()
             profile.updatedAt = Date()
             for (index, item) in HostsParser.parse(content).filter({ !$0.isSystem }).enumerated() {
@@ -2390,46 +2559,60 @@ struct BackupsView: View {
                 try context.save()
                 restoreMessage = l10n.s("已恢复为新配置。", "Restored as a new profile.")
             } catch {
+                context.rollback()
                 restoreMessage = error.localizedDescription
             }
             return
         }
         Task {
             do {
-                let backupURL = try await writeCoordinator.write(content)
-                let record = BackupRecord(context: context)
-                record.id = UUID()
-                record.timestamp = Date()
-                record.filePath = backupURL.path
-                record.note = l10n.s("还原备份前自动备份", "Auto backup before restore")
-                try context.save()
-                try BackupMaintenance.prune(context: context)
+                let result = try await writeCoordinator.perform(
+                    makeContent: { HostsWriteRequest(content: content) },
+                    commit: { result in
+                        try commitHostsWrite(
+                            result: result,
+                            context: context,
+                            profileName: nil,
+                            note: l10n.s("还原备份前自动备份", "Auto backup before restore")
+                        ) {}
+                    }
+                )
+                _ = result
                 await MainActor.run { restoreMessage = l10n.s("已还原备份", "Backup restored") }
             } catch {
-                await MainActor.run { restoreMessage = error.localizedDescription }
+                await MainActor.run {
+                    if let commitError = error as? HostsWriteCommitError {
+                        restoreMessage = l10n.s(
+                            "/etc/hosts 已还原，但备份记录保存失败。\n\(commitError.underlying.localizedDescription)",
+                            "/etc/hosts was restored, but the backup record could not be saved.\n\(commitError.underlying.localizedDescription)"
+                        )
+                    } else {
+                        restoreMessage = error.localizedDescription
+                    }
+                }
             }
         }
     }
 
     private func delete(_ backup: BackupRecord) {
-        if let path = backup.filePath {
-            if FileManager.default.fileExists(atPath: path) {
-                do {
-                    try FileManager.default.removeItem(atPath: path)
-                } catch {
-                    restoreMessage = l10n.s(
-                        "无法删除备份文件，记录已保留。",
-                        "Unable to delete the backup file; its record was kept."
-                    )
-                    return
-                }
-            }
-        }
+        let path = backup.filePath
         context.delete(backup)
         do {
             try context.save()
         } catch {
+            context.rollback()
             restoreMessage = error.localizedDescription
+            return
+        }
+        if let path, FileManager.default.fileExists(atPath: path) {
+            do {
+                try FileManager.default.removeItem(atPath: path)
+            } catch {
+                restoreMessage = l10n.s(
+                    "备份记录已删除，但备份文件无法移除。",
+                    "The backup record was deleted, but its file could not be removed."
+                )
+            }
         }
     }
 }
@@ -2760,9 +2943,13 @@ struct SettingsView: View {
         .onChange(of: retention) { _, newValue in
             settings.first?.backupRetention = Int64(newValue)
             saveSettings()
-            if let context = settings.first?.managedObjectContext,
-               (try? BackupMaintenance.prune(context: context)) == nil {
-                settingsError = l10n.s("无法清理旧备份。", "Unable to prune old backups.")
+            if let context = settings.first?.managedObjectContext {
+                do {
+                    try BackupMaintenance.prune(context: context)
+                } catch {
+                    context.rollback()
+                    settingsError = l10n.s("无法清理旧备份。", "Unable to prune old backups.")
+                }
             }
         }
         .alert(
@@ -2793,6 +2980,7 @@ struct SettingsView: View {
         do {
             try context.save()
         } catch {
+            context.rollback()
             settingsError = error.localizedDescription
         }
     }
@@ -2823,7 +3011,7 @@ struct SettingsRow<Content: View>: View {
 // MARK: - Apply flow
 
 struct ApplySheet: View {
-    let profile: Profile
+    @ObservedObject var profile: Profile
     @Environment(\.managedObjectContext) private var context
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var l10n: Localization
@@ -2852,7 +3040,7 @@ struct ApplySheet: View {
 
     private var otherActiveProfiles: [Profile] {
         let all = (try? context.fetch(Profile.fetchRequest())) ?? []
-        return all.filter { $0.isActive && !$0.isSystem && $0.id != profile.id }
+        return all.filter { $0.isAppliedForSystem && $0.id != profile.id }
     }
 
     private var target: String {
@@ -2878,8 +3066,20 @@ struct ApplySheet: View {
         HostValidator.issues(entries: parsed.filter(\.isEnabled))
     }
 
+    private var conflictIssues: [HostIssue] {
+        validationIssues.filter { $0.kind == .conflict }
+    }
+
     private var duplicateIssues: [HostIssue] {
         validationIssues.filter { $0.kind == .duplicate }
+    }
+
+    private var hasExactDuplicatesInProfile: Bool {
+        var seen = Set<String>()
+        return profile.sortedEntries.contains { entry in
+            let key = (entry.ip ?? "") + "|" + entry.hostList.joined(separator: ",")
+            return !seen.insert(key).inserted
+        }
     }
 
     private var preview: some View {
@@ -2904,16 +3104,33 @@ struct ApplySheet: View {
             if !validationIssues.isEmpty {
                 VStack(alignment: .leading, spacing: 6) {
                     Label(
-                        l10n.s("存在主机名冲突或重复条目", "Hostname conflicts or duplicates must be resolved"),
+                        conflictIssues.isEmpty
+                            ? l10n.s("存在完全重复条目", "Exact duplicates found")
+                            : l10n.s("存在主机名冲突", "Hostname conflict found"),
                         systemImage: "exclamationmark.triangle.fill"
                     )
                     .font(.system(size: 12.5, weight: .semibold))
-                    .foregroundStyle(.orange)
+                    .foregroundStyle(conflictIssues.isEmpty ? .green : .orange)
                     Text(validationIssues.map(\.hostname).joined(separator: ", "))
                         .font(.system(.caption, design: .monospaced))
                         .foregroundStyle(.secondary)
-                    if !duplicateIssues.isEmpty {
-                        Button(l10n.s("移除完全重复条目", "Remove Exact Duplicates")) {
+                    if !conflictIssues.isEmpty {
+                        Text(l10n.s(
+                            "这些主机名分别指向了不同 IP；修复前不会写入系统。",
+                            "These hostnames point to different IPs; nothing will be written until they are fixed."
+                        ))
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                    } else if !duplicateIssues.isEmpty {
+                        Text(l10n.s(
+                            "完全重复条目会在写入时自动去重，不会阻止应用。",
+                            "Exact duplicates are removed automatically when applying and do not block the write."
+                        ))
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                    }
+                    if hasExactDuplicatesInProfile {
+                        Button(l10n.s("清理当前配置中的完全重复条目", "Remove Exact Duplicates in This Profile")) {
                             removeExactDuplicates()
                         }
                         .buttonStyle(.glass)
@@ -2930,7 +3147,7 @@ struct ApplySheet: View {
                 Spacer()
                 Button(l10n.s("取消", "Cancel")) { dismiss() }.buttonStyle(.glass)
                 Button(l10n.s("确认应用", "Confirm Apply")) { startWrite() }.buttonStyle(.glassProminent)
-                    .disabled(!validationIssues.isEmpty || writeCoordinator.isWriting)
+                    .disabled(!conflictIssues.isEmpty)
                     .accessibilityIdentifier("confirm-apply-button")
             }
         }
@@ -3066,27 +3283,38 @@ struct ApplySheet: View {
     }
 
     private func startWrite() {
-        guard validationIssues.isEmpty, !writeCoordinator.isWriting else { return }
+        guard conflictIssues.isEmpty else { return }
         captureBaselineIfNeeded()
         phase = .writing
-        let originalActive = profile.isActive
-        let originalEnabled = profile.isEnabled
         Task {
             do {
-                let backupURL = try await writeCoordinator.write(target)
-                try recordBackup(at: backupURL)
-                profile.isActive = true
-                profile.isEnabled = true
-                profile.lastActivatedAt = Date()
-                profile.updatedAt = Date()
-                try context.save()
+                var appliedProfiles: [Profile] = []
+                let content = HostsParser.mergedContent(entries: parsed)
+                _ = try await writeCoordinator.perform(
+                    makeContent: {
+                        appliedProfiles = self.otherActiveProfiles + [profile]
+                        return HostsWriteRequest(content: content)
+                    },
+                    commit: { result in
+                        try commitHostsWrite(
+                            result: result,
+                            context: context,
+                            profileName: profile.localizedName(isEnglish: l10n.isEnglish),
+                            note: l10n.s(
+                                "应用“\(profile.localizedName(isEnglish: l10n.isEnglish))”前自动备份",
+                                "Auto backup before applying “\(profile.localizedName(isEnglish: l10n.isEnglish))”"
+                            )
+                        ) {
+                            markProfilesApplied(appliedProfiles)
+                            profile.setApplied(true)
+                            profile.lastActivatedAt = Date()
+                            profile.updatedAt = Date()
+                        }
+                    }
+                )
                 sourceDraftCleanup()
                 await MainActor.run { phase = .done }
             } catch {
-                profile.isActive = originalActive
-                profile.isEnabled = originalEnabled
-                profile.updatedAt = Date()
-                try? context.save()
                 await MainActor.run {
                     writeError = localizedError(error)
                     phase = .done
@@ -3106,24 +3334,10 @@ struct ApplySheet: View {
         }
         do {
             try context.save()
-            NotificationCenter.default.post(name: .profileEntriesChanged, object: profile.id)
         } catch {
-            writeError = error.localizedDescription
+            context.rollback()
+            writeError = l10n.s("无法清理重复条目。", "Unable to remove duplicate entries.")
         }
-    }
-
-    private func recordBackup(at url: URL) throws {
-        let record = BackupRecord(context: context)
-        record.id = UUID()
-        record.timestamp = Date()
-        record.filePath = url.path
-        record.profileName = profile.localizedName(isEnglish: l10n.isEnglish)
-        record.note = l10n.s(
-            "应用“\(profile.localizedName(isEnglish: l10n.isEnglish))”前自动备份",
-            "Auto backup before applying “\(profile.localizedName(isEnglish: l10n.isEnglish))”"
-        )
-        try context.save()
-        try BackupMaintenance.prune(context: context)
     }
 
     private func sourceDraftCleanup() {
@@ -3131,6 +3345,24 @@ struct ApplySheet: View {
     }
 
     private func localizedError(_ error: Error) -> String {
+        if error is HostsWriteConflictError {
+            return l10n.s(
+                "配置与其它已启用配置存在主机名冲突，未写入系统。",
+                "The profile conflicts with another active profile; nothing was written."
+            )
+        }
+        if error is HostsWriteAbortedError {
+            return l10n.s(
+                "写入已取消，配置状态未变更。",
+                "The write was cancelled; profile state was not changed."
+            )
+        }
+        if let commitError = error as? HostsWriteCommitError {
+            return l10n.s(
+                "/etc/hosts 已写入，但配置状态保存失败。请检查磁盘空间后重试同步。\n\(commitError.underlying.localizedDescription)",
+                "/etc/hosts was written, but the profile state could not be saved. Check available disk space and resync.\n\(commitError.underlying.localizedDescription)"
+            )
+        }
         if let writeError = error as? HostsWriteError {
             switch writeError {
             case .invalidContent(_):
@@ -3150,8 +3382,6 @@ struct ApplySheet: View {
                 return l10n.s("写入后校验失败。", "Verification failed after writing.")
             case .timedOut:
                 return l10n.s("后台写入助手响应超时。", "The background writer helper timed out.")
-            case .alreadyInProgress:
-                return l10n.s("已有写入任务正在进行。", "Another write is already in progress.")
             }
         }
         return error.localizedDescription

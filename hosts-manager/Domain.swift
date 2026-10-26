@@ -196,7 +196,6 @@ enum HostsWriteError: LocalizedError {
     case readFailed
     case verificationFailed
     case timedOut
-    case alreadyInProgress
 
     var errorDescription: String? {
         switch self {
@@ -207,7 +206,6 @@ enum HostsWriteError: LocalizedError {
         case .readFailed: return "Unable to read /etc/hosts."
         case .verificationFailed: return "Verification failed after writing /etc/hosts."
         case .timedOut: return "The background writer helper timed out."
-        case .alreadyInProgress: return "Another write is already in progress."
         }
     }
 }

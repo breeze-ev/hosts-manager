@@ -86,13 +86,13 @@ final class PersistenceController: ObservableObject {
 
         if let system = all.first(where: { $0.name == "系统" }) {
             system.isSystem = true
-            system.isActive = false
+            system.setApplied(false)
             for entry in system.sortedEntries { context.delete(entry) }
         } else {
             let system = Profile(context: context)
             system.id = UUID()
             system.name = "系统"
-            system.isActive = false
+            system.setApplied(false)
             system.isSystem = true
             system.createdAt = Date()
             system.updatedAt = Date()
@@ -102,7 +102,7 @@ final class PersistenceController: ObservableObject {
             let profile = Profile(context: context)
             profile.id = UUID()
             profile.name = "默认"
-            profile.isActive = true
+            profile.setApplied(true)
             profile.isSystem = false
             profile.lastActivatedAt = Date()
             profile.createdAt = Date()
@@ -128,8 +128,15 @@ final class PersistenceController: ObservableObject {
         }
         // Backfill activation timestamps so older stores can still pick the
         // most recently activated profile on launch.
-        for profile in all where profile.isActive && !profile.isSystem && profile.lastActivatedAt == nil {
+        for profile in all where profile.isAppliedForSystem && profile.lastActivatedAt == nil {
             profile.lastActivatedAt = profile.updatedAt ?? profile.createdAt
+        }
+        // 统一状态：开关（isEnabled）表示“该配置已写入 /etc/hosts”，必须与
+        // isActive 一致。旧版本把新建 / 导入 / 复制出来的配置标成 isEnabled = true
+        // 却从未写入，导致开关显示“已生效”但系统里没有内容；这里以实际写入状态为准
+        // 把开关关掉（条目不会丢失，重新打开开关即可写入）。
+        for profile in all where !profile.isSystem && profile.isEnabled != profile.isActive {
+            profile.synchronizeAppliedMirror()
         }
         try context.save()
     }
@@ -142,7 +149,7 @@ final class PersistenceController: ObservableObject {
         let systemProfile = Profile(context: context)
         systemProfile.id = UUID()
         systemProfile.name = "系统"
-        systemProfile.isActive = false
+        systemProfile.setApplied(false)
         systemProfile.isSystem = true
         systemProfile.createdAt = Date()
         systemProfile.updatedAt = Date()
@@ -151,7 +158,7 @@ final class PersistenceController: ObservableObject {
         let profile = Profile(context: context)
         profile.id = UUID()
         profile.name = "默认"
-        profile.isActive = true
+        profile.setApplied(true)
         profile.isSystem = false
         profile.lastActivatedAt = Date()
         profile.createdAt = Date()
@@ -201,7 +208,7 @@ final class PersistenceController: ObservableObject {
             attribute("name", .stringAttributeType),
             attribute("isActive", .booleanAttributeType, defaultValue: false),
             attribute("isSystem", .booleanAttributeType, defaultValue: false),
-            attribute("isEnabled", .booleanAttributeType, defaultValue: true),
+            attribute("isEnabled", .booleanAttributeType, defaultValue: false),
             attribute("createdAt", .dateAttributeType),
             attribute("updatedAt", .dateAttributeType),
             attribute("lastActivatedAt", .dateAttributeType)
