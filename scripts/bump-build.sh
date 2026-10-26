@@ -2,6 +2,12 @@
 # Increment CURRENT_PROJECT_VERSION (build number) for all targets by 1.
 set -euo pipefail
 
+# Only bump on Release builds (archives); Debug builds leave the project untouched.
+if [ "${CONFIGURATION:-Release}" != "Release" ]; then
+    echo "Skipping build number bump (configuration: ${CONFIGURATION})"
+    exit 0
+fi
+
 PBXPROJ="${SRCROOT:-$(cd "$(dirname "$0")/.." && pwd)}/hosts-manager.xcodeproj/project.pbxproj"
 
 /usr/bin/env python3 - "$PBXPROJ" <<'EOF'
