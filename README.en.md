@@ -8,7 +8,7 @@
 
 Manage `/etc/hosts` with profiles: structured list editing, source editing, real-time apply, automatic backups, and a signed background writer helper.
 
-It is currently open source but has not published a signed DMG yet. You can build and run it locally with Xcode, or wait for the first Developer ID-signed release.
+The current **0.1.0-beta** public beta ships ad-hoc signed DMGs (not notarized) — see [Installation](#installation) below. You can also build and run it from source.
 
 ## Screenshot
 
@@ -37,12 +37,12 @@ It is currently open source but has not published a signed DMG yet. You can buil
 
 ## Installation
 
-Download the DMG matching your Mac from the [Releases](https://github.com/breeze-ev/hosts-manager/releases) page:
+Download the DMG matching your Mac from the [Releases](https://github.com/breeze-ev/hosts-manager/releases) page (currently 0.1.0-beta):
 
 | File | Mac |
 | --- | --- |
-| `Hosts-Manager-<version>-<build>-arm64.dmg` | Apple Silicon (M-series) |
-| `Hosts-Manager-<version>-<build>-x86_64.dmg` | Intel |
+| `Hosts-Manager-0.1.0-beta-6-arm64.dmg` | Apple Silicon (M-series) |
+| `Hosts-Manager-0.1.0-beta-6-x86_64.dmg` | Intel |
 
 Not sure which one? Open the Apple menu → About This Mac: "Chip" shows an Apple M-series for arm64, or Intel for x86_64.
 
@@ -52,7 +52,7 @@ To install:
 2. Drag **Hosts Manager** into the **Applications** folder.
 3. Launch Hosts Manager from Applications.
 
-If the build is not notarized (ad-hoc signed), Gatekeeper blocks the first launch: right-click the app in Finder, choose **Open**, then confirm. You can also run `xattr -d com.apple.quarantine /Applications/Hosts\ Manager.app` to remove the quarantine attribute.
+The beta builds are ad-hoc signed and not notarized, so Gatekeeper blocks the first launch: right-click the app in Finder, choose **Open**, then confirm. You can also run `xattr -d com.apple.quarantine /Applications/Hosts\ Manager.app` to remove the quarantine attribute.
 
 ## Build from Source
 
