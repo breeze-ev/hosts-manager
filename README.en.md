@@ -6,7 +6,11 @@
 
 <p align="center">Hosts Manager is the <b>modern</b> hosts file manager for macOS.</p>
 
-Manage `/etc/hosts` with profiles: structured list editing, source editing, real-time apply, automatic backups, and a signed background writer helper.
+Hosts Manager manages the domain-to-IP mappings in `/etc/hosts`, serving two main purposes: local domain mapping for front-end/back-end development, and blocking network connections of specific apps or domains.
+
+- **Project-based profiles**: organize mappings in profiles that can be switched or combined per project or scenario, and easily shared with teammates.
+- **Two editing styles**: structured list editing and raw hosts source editing — pick whichever suits your habit.
+- **Backup on every write**: every change is automatically backed up to prevent accidental loss, and profiles can be imported and exported.
 
 ## Screenshot
 
