@@ -8,8 +8,6 @@
 
 Manage `/etc/hosts` with profiles: structured list editing, source editing, real-time apply, automatic backups, and a signed background writer helper.
 
-The current **0.1.0-beta** public beta ships ad-hoc signed DMGs (not notarized) — see [Installation](#installation) below. You can also build and run it from source.
-
 ## Screenshot
 
 <p align="center">
