@@ -11,6 +11,7 @@ TEAM_ID="${TEAM_ID:-$(sed -n 's/.*DEVELOPMENT_TEAM = \([^;]*\);.*/\1/p' "$PBXPRO
 SIGNING_IDENTITY="${SIGNING_IDENTITY:-Developer ID Application}"
 OUTPUT_DIR="${OUTPUT_DIR:-dist}"
 SKIP_NOTARIZE="${SKIP_NOTARIZE:-0}"
+ADHOC="${ADHOC:-0}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -36,6 +37,12 @@ while [[ $# -gt 0 ]]; do
       ;;
     --skip-notarize)
       SKIP_NOTARIZE=1
+      shift
+      ;;
+    --adhoc)
+      ADHOC=1
+      SKIP_NOTARIZE=1
+      SIGNING_IDENTITY="-"
       shift
       ;;
     *)
@@ -78,32 +85,51 @@ for ARCH in arm64 x86_64; do
   ARCHIVE_PATH="$WORK_DIR/HostsManager-${ARCH}.xcarchive"
   EXPORT_PATH="$WORK_DIR/export-${ARCH}"
   STAGING_PATH="$WORK_DIR/staging-${ARCH}"
-  DMG_PATH="$ROOT_DIR/$OUTPUT_DIR/Hosts-Manager-${VERSION}-${ARCH}.dmg"
+  DMG_PATH="$ROOT_DIR/$OUTPUT_DIR/Hosts-Manager-${VERSION}-${BUILD_NUMBER}-${ARCH}.dmg"
 
   echo "Archiving Hosts Manager v${VERSION} (${BUILD_NUMBER}) [${ARCH}]..."
-  xcodebuild archive \
-    -project "$ROOT_DIR/hosts-manager.xcodeproj" \
-    -scheme hosts-manager \
-    -configuration Release \
-    -destination 'generic/platform=macOS' \
-    -archivePath "$ARCHIVE_PATH" \
-    -derivedDataPath "$WORK_DIR/DerivedData-${ARCH}" \
-    DEVELOPMENT_TEAM="$TEAM_ID" \
-    CODE_SIGN_IDENTITY="$SIGNING_IDENTITY" \
-    CODE_SIGN_STYLE=Manual \
-    MARKETING_VERSION="$VERSION" \
-    CURRENT_PROJECT_VERSION="$BUILD_NUMBER" \
-    BUMP_BUILD_NUMBER=0 \
-    ARCHS="$ARCH" \
-    ONLY_ACTIVE_ARCH=NO
+  if [[ "$ADHOC" == "1" ]]; then
+    xcodebuild archive \
+      -project "$ROOT_DIR/hosts-manager.xcodeproj" \
+      -scheme hosts-manager \
+      -configuration Release \
+      -destination 'generic/platform=macOS' \
+      -archivePath "$ARCHIVE_PATH" \
+      -derivedDataPath "$WORK_DIR/DerivedData-${ARCH}" \
+      CODE_SIGN_IDENTITY="-" \
+      CODE_SIGNING_REQUIRED=NO \
+      CODE_SIGNING_ALLOWED=YES \
+      MARKETING_VERSION="$VERSION" \
+      CURRENT_PROJECT_VERSION="$BUILD_NUMBER" \
+      BUMP_BUILD_NUMBER=0 \
+      ARCHS="$ARCH" \
+      ONLY_ACTIVE_ARCH=NO
+    APP_PATH="$ARCHIVE_PATH/Products/Applications/Hosts Manager.app"
+  else
+    xcodebuild archive \
+      -project "$ROOT_DIR/hosts-manager.xcodeproj" \
+      -scheme hosts-manager \
+      -configuration Release \
+      -destination 'generic/platform=macOS' \
+      -archivePath "$ARCHIVE_PATH" \
+      -derivedDataPath "$WORK_DIR/DerivedData-${ARCH}" \
+      DEVELOPMENT_TEAM="$TEAM_ID" \
+      CODE_SIGN_IDENTITY="$SIGNING_IDENTITY" \
+      CODE_SIGN_STYLE=Manual \
+      MARKETING_VERSION="$VERSION" \
+      CURRENT_PROJECT_VERSION="$BUILD_NUMBER" \
+      BUMP_BUILD_NUMBER=0 \
+      ARCHS="$ARCH" \
+      ONLY_ACTIVE_ARCH=NO
 
-  echo "Exporting signed app [${ARCH}]..."
-  xcodebuild -exportArchive \
-    -archivePath "$ARCHIVE_PATH" \
-    -exportPath "$EXPORT_PATH" \
-    -exportOptionsPlist "$WORK_DIR/export-options.plist"
+    echo "Exporting signed app [${ARCH}]..."
+    xcodebuild -exportArchive \
+      -archivePath "$ARCHIVE_PATH" \
+      -exportPath "$EXPORT_PATH" \
+      -exportOptionsPlist "$WORK_DIR/export-options.plist"
+    APP_PATH="$EXPORT_PATH/Hosts Manager.app"
+  fi
 
-  APP_PATH="$EXPORT_PATH/Hosts Manager.app"
   HELPER_PATH="$APP_PATH/Contents/MacOS/HostsManagerHelper"
 
   echo "Verifying signatures and architecture [${ARCH}]..."

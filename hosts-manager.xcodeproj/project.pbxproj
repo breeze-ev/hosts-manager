@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		A840FBEF308F01AC0036F61E /* AppIcon.icon in Resources */ = {isa = PBXBuildFile; fileRef = A840FBEE308F01AC0036F61E /* AppIcon.icon */; };
+		A840FE2F308F151D0036F61E /* .gitingnore in Resources */ = {isa = PBXBuildFile; fileRef = A840FE2E308F15110036F61E /* .gitingnore */; };
 		B1000000000000000000000B /* HostsManagerHelper in Copy Helper Executable */ = {isa = PBXBuildFile; fileRef = B1000000000000000000000E /* HostsManagerHelper */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
 		B1000000000000000000000D /* com.breeze.hostsmanager.helper.plist in Copy Helper Plist */ = {isa = PBXBuildFile; fileRef = B1000000000000000000000F /* com.breeze.hostsmanager.helper.plist */; };
 /* End PBXBuildFile section */
@@ -63,6 +64,7 @@
 
 /* Begin PBXFileReference section */
 		A840FBEE308F01AC0036F61E /* AppIcon.icon */ = {isa = PBXFileReference; lastKnownFileType = folder.iconcomposer.icon; path = AppIcon.icon; sourceTree = "<group>"; };
+		A840FE2E308F15110036F61E /* .gitingnore */ = {isa = PBXFileReference; lastKnownFileType = text; path = .gitingnore; sourceTree = "<group>"; };
 		A8EA9D14303558C000530128 /* Hosts Manager.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Hosts Manager.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		A8EA9D26303558C100530128 /* hosts-managerTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "hosts-managerTests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
 		A8EA9D30303558C100530128 /* hosts-managerUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "hosts-managerUITests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -141,6 +143,7 @@
 				A8EA9D33303558C100530128 /* hosts-managerUITests */,
 				A8EA9D15303558C000530128 /* Products */,
 				A840FBEE308F01AC0036F61E /* AppIcon.icon */,
+				A840FE2E308F15110036F61E /* .gitingnore */,
 			);
 			sourceTree = "<group>";
 		};
@@ -302,6 +305,32 @@
 		};
 /* End PBXProject section */
 
+/* Begin PBXResourcesBuildPhase section */
+		A8EA9D12303558C000530128 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A840FBEF308F01AC0036F61E /* AppIcon.icon in Resources */,
+				A840FE2F308F151D0036F61E /* .gitingnore in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		A8EA9D24303558C100530128 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		A8EA9D2E303558C100530128 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
 /* Begin PBXShellScriptBuildPhase section */
 		B10000000000000000000012 /* Bump Build Number */ = {
 			isa = PBXShellScriptBuildPhase;
@@ -323,31 +352,6 @@
 			shellScript = "\"$SRCROOT/scripts/bump-build.sh\"\n";
 		};
 /* End PBXShellScriptBuildPhase section */
-
-/* Begin PBXResourcesBuildPhase section */
-		A8EA9D12303558C000530128 /* Resources */ = {
-			isa = PBXResourcesBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-				A840FBEF308F01AC0036F61E /* AppIcon.icon in Resources */,
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
-		A8EA9D24303558C100530128 /* Resources */ = {
-			isa = PBXResourcesBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
-		A8EA9D2E303558C100530128 /* Resources */ = {
-			isa = PBXResourcesBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
-/* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		A8EA9D10303558C000530128 /* Sources */ = {

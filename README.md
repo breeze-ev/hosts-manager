@@ -1,10 +1,20 @@
-# Hosts Manager
+<p align="center">
+<img height="256" src="website/assets/hosts-manager-icon.png">
+</p>
 
-Hosts Manager 是一款 macOS 应用，用于通过配置管理 `/etc/hosts`：支持结构化列表编辑、源码编辑、实时应用、自动备份，以及经过签名校验的后台写入助手。
+<h1 align="center">Hosts Manager</h1>
+
+<p align="center">Hosts Manager 是一款 <b>现代化</b> 的 macOS hosts 文件管理工具。</p>
+
+通过配置管理 `/etc/hosts`：支持结构化列表编辑、源码编辑、实时应用、自动备份，以及经过签名校验的后台写入助手。
 
 项目当前已经开源，但尚未发布经过 Developer ID 签名的 DMG。你可以先用 Xcode 在本地构建运行，也可以等待第一个正式发布版本。
 
-![Hosts Manager](website/assets/hosts-manager-main.png)
+## 截图
+
+<p align="center">
+<img src="website/assets/hosts-manager-main.png" alt="Hosts Manager 主界面">
+</p>
 
 ## 功能
 
@@ -24,6 +34,25 @@ Hosts Manager 是一款 macOS 应用，用于通过配置管理 `/etc/hosts`：�
 
 - macOS 26 或更高版本
 - 构建需要 Xcode 26.6 或更高版本
+
+## 安装说明
+
+从 [Releases](https://github.com/breeze-ev/hosts-manager/releases) 页面下载与你的 Mac 芯片匹配的 DMG：
+
+| 文件 | 适用机型 |
+| --- | --- |
+| `Hosts-Manager-<版本>-<build号>-arm64.dmg` | Apple Silicon（M 系列芯片） |
+| `Hosts-Manager-<版本>-<build号>-x86_64.dmg` | Intel 芯片 |
+
+不确定芯片型号？点击左上角苹果菜单 → 关于本机，"芯片"一栏显示 Apple M 系列则下载 arm64，显示 Intel 则下载 x86_64。
+
+安装步骤：
+
+1. 双击打开下载的 DMG 文件。
+2. 将 **Hosts Manager** 拖入 **Applications** 文件夹。
+3. 从"应用程序"中启动 Hosts Manager。
+
+如果应用未经公证（ad-hoc 签名版本），首次打开会被 Gatekeeper 拦截：在"访达"中右键点击应用并选择"打开"，再在弹窗中确认"打开"即可；也可以执行 `xattr -d com.apple.quarantine /Applications/Hosts\ Manager.app` 移除隔离属性。
 
 ## 从源码构建
 
@@ -51,11 +80,14 @@ xcodebuild build \
 
 ## 发布打包
 
-`scripts/build-dmg.sh` 负责归档、签名、公证并生成 Universal DMG。它面向已拥有 Developer ID 身份的维护者，需要 `APPLE_API_KEY_ID`、`APPLE_API_ISSUER_ID` 和 `APPLE_API_KEY_PATH` 环境变量。
+`scripts/build-dmg.sh` 负责归档、签名并分别生成 arm64 与 x86_64 两个 DMG。版本号、build 号与 Team ID 默认从 Xcode 项目中读取，无需手动传参：
 
 ```bash
-./scripts/build-dmg.sh --team-id YOUR_TEAM_ID --version 0.1.0
+./scripts/build-dmg.sh           # Developer ID 签名 + 公证（需要付费开发者证书）
+./scripts/build-dmg.sh --adhoc   # ad-hoc 签名、跳过公证，无需证书，适合本地/内测分发
 ```
+
+公证需要设置 `APPLE_API_KEY_ID`、`APPLE_API_ISSUER_ID` 和 `APPLE_API_KEY_PATH` 环境变量；只想跳过公证可传 `--skip-notarize`。产物输出到 `dist/` 目录，并附带 sha256 校验文件。
 
 ## 文档
 

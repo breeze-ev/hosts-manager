@@ -1,10 +1,20 @@
-# Hosts Manager
+<p align="center">
+<img height="256" src="website/assets/hosts-manager-icon.png">
+</p>
 
-Hosts Manager is a macOS app for managing `/etc/hosts` with profiles, structured list editing, source editing, real-time apply, automatic backups, and a signed background writer helper.
+<h1 align="center">Hosts Manager</h1>
+
+<p align="center">Hosts Manager is the <b>modern</b> hosts file manager for macOS.</p>
+
+Manage `/etc/hosts` with profiles: structured list editing, source editing, real-time apply, automatic backups, and a signed background writer helper.
 
 It is currently open source but has not published a signed DMG yet. You can build and run it locally with Xcode, or wait for the first Developer ID-signed release.
 
-![Hosts Manager](website/assets/hosts-manager-main.png)
+## Screenshot
+
+<p align="center">
+<img src="website/assets/hosts-manager-main.png" alt="Hosts Manager main window">
+</p>
 
 ## Features
 
@@ -24,6 +34,25 @@ It is currently open source but has not published a signed DMG yet. You can buil
 
 - macOS 26 or newer
 - Xcode 26.6 or newer to build
+
+## Installation
+
+Download the DMG matching your Mac from the [Releases](https://github.com/breeze-ev/hosts-manager/releases) page:
+
+| File | Mac |
+| --- | --- |
+| `Hosts-Manager-<version>-<build>-arm64.dmg` | Apple Silicon (M-series) |
+| `Hosts-Manager-<version>-<build>-x86_64.dmg` | Intel |
+
+Not sure which one? Open the Apple menu → About This Mac: "Chip" shows an Apple M-series for arm64, or Intel for x86_64.
+
+To install:
+
+1. Open the downloaded DMG.
+2. Drag **Hosts Manager** into the **Applications** folder.
+3. Launch Hosts Manager from Applications.
+
+If the build is not notarized (ad-hoc signed), Gatekeeper blocks the first launch: right-click the app in Finder, choose **Open**, then confirm. You can also run `xattr -d com.apple.quarantine /Applications/Hosts\ Manager.app` to remove the quarantine attribute.
 
 ## Build from Source
 
@@ -53,11 +82,14 @@ For a source-only build, the helper may not install unless both the app and help
 
 ## Release Packaging
 
-`scripts/build-dmg.sh` archives, signs, notarizes, and staples a universal DMG. It is intended for maintainers with a Developer ID identity and the `APPLE_API_KEY_ID`, `APPLE_API_ISSUER_ID`, and `APPLE_API_KEY_PATH` environment variables.
+`scripts/build-dmg.sh` archives, signs, and builds two separate DMGs (arm64 and x86_64). Version, build number, and Team ID are read from the Xcode project automatically:
 
 ```bash
-./scripts/build-dmg.sh --team-id YOUR_TEAM_ID --version 0.1.0
+./scripts/build-dmg.sh           # Developer ID signed + notarized (requires a paid developer certificate)
+./scripts/build-dmg.sh --adhoc   # ad-hoc signed, no notarization, no certificate needed; good for local/beta distribution
 ```
+
+Notarization requires the `APPLE_API_KEY_ID`, `APPLE_API_ISSUER_ID`, and `APPLE_API_KEY_PATH` environment variables; use `--skip-notarize` to skip it only. Artifacts are written to `dist/` with sha256 checksum files.
 
 ## Documentation
 
