@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		A840FBEF308F01AC0036F61E /* AppIcon.icon in Resources */ = {isa = PBXBuildFile; fileRef = A840FBEE308F01AC0036F61E /* AppIcon.icon */; };
 		B1000000000000000000000B /* HostsManagerHelper in Copy Helper Executable */ = {isa = PBXBuildFile; fileRef = B1000000000000000000000E /* HostsManagerHelper */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
 		B1000000000000000000000D /* com.breeze.hostsmanager.helper.plist in Copy Helper Plist */ = {isa = PBXBuildFile; fileRef = B1000000000000000000000F /* com.breeze.hostsmanager.helper.plist */; };
 /* End PBXBuildFile section */
@@ -61,11 +62,12 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		A840FBEE308F01AC0036F61E /* AppIcon.icon */ = {isa = PBXFileReference; lastKnownFileType = folder.iconcomposer.icon; path = AppIcon.icon; sourceTree = "<group>"; };
 		A8EA9D14303558C000530128 /* Hosts Manager.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Hosts Manager.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		A8EA9D26303558C100530128 /* hosts-managerTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "hosts-managerTests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
 		A8EA9D30303558C100530128 /* hosts-managerUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "hosts-managerUITests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
 		B1000000000000000000000E /* HostsManagerHelper */ = {isa = PBXFileReference; explicitFileType = "compiled.mach-o.executable"; includeInIndex = 0; path = HostsManagerHelper; sourceTree = BUILT_PRODUCTS_DIR; };
-		B1000000000000000000000F /* com.breeze.hostsmanager.helper.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = "com.breeze.hostsmanager.helper.plist"; sourceTree = "<group>"; };
+		B1000000000000000000000F /* com.breeze.hostsmanager.helper.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = com.breeze.hostsmanager.helper.plist; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -138,6 +140,7 @@
 				A8EA9D29303558C100530128 /* hosts-managerTests */,
 				A8EA9D33303558C100530128 /* hosts-managerUITests */,
 				A8EA9D15303558C000530128 /* Products */,
+				A840FBEE308F01AC0036F61E /* AppIcon.icon */,
 			);
 			sourceTree = "<group>";
 		};
@@ -303,6 +306,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				A840FBEF308F01AC0036F61E /* AppIcon.icon in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -426,6 +430,7 @@
 				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
 				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
 				MACOSX_DEPLOYMENT_TARGET = 26.0;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
@@ -486,6 +491,7 @@
 				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
 				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
 				MACOSX_DEPLOYMENT_TARGET = 26.0;
 				MTL_ENABLE_DEBUG_INFO = NO;
@@ -668,7 +674,7 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				MACOSX_DEPLOYMENT_TARGET = 26.0;
 				MARKETING_VERSION = 0.1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = "com.breeze.hostsmanager.helper";
+				PRODUCT_BUNDLE_IDENTIFIER = com.breeze.hostsmanager.helper;
 				PRODUCT_MODULE_NAME = HostsManagerHelper;
 				PRODUCT_NAME = HostsManagerHelper;
 				SKIP_INSTALL = YES;
@@ -689,7 +695,7 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				MACOSX_DEPLOYMENT_TARGET = 26.0;
 				MARKETING_VERSION = 0.1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = "com.breeze.hostsmanager.helper";
+				PRODUCT_BUNDLE_IDENTIFIER = com.breeze.hostsmanager.helper;
 				PRODUCT_MODULE_NAME = HostsManagerHelper;
 				PRODUCT_NAME = HostsManagerHelper;
 				SKIP_INSTALL = YES;
