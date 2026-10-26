@@ -97,6 +97,7 @@ Notarization requires the `APPLE_API_KEY_ID`, `APPLE_API_ISSUER_ID`, and `APPLE_
 ## Documentation
 
 - [中文说明](README.md)
+- [Changelog](CHANGELOG.en.md)
 - [Contributing](CONTRIBUTING.md)
 - [Security](SECURITY.md)
 - [Privacy](PRIVACY.md)

@@ -95,6 +95,7 @@ xcodebuild build \
 ## 文档
 
 - [English README](README.en.md)
+- [更新日志](CHANGELOG.md)
 - [贡献指南](CONTRIBUTING.md)
 - [安全说明](SECURITY.md)
 - [隐私说明](PRIVACY.md)
