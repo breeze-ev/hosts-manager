@@ -1,0 +1,3 @@
+// Local build number, not tracked by git.
+// Copy to Config/BuildNumber.xcconfig; scripts/bump-build.sh auto-increments it on Release builds.
+CURRENT_PROJECT_VERSION = 1

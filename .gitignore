@@ -13,3 +13,4 @@ xcuserdata/
 .env
 secrets/
 Config/Local.xcconfig
+Config/BuildNumber.xcconfig

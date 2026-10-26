@@ -84,10 +84,13 @@ xcodebuild build \
 
 ```bash
 ./scripts/build-dmg.sh           # Developer ID 签名 + 公证（需要付费开发者证书）
-./scripts/build-dmg.sh --adhoc   # ad-hoc 签名、跳过公证，无需证书，适合本地/内测分发
+./scripts/build-dmg.sh --dev     # Apple Development 签名、跳过公证，适合本地自用（推荐）
+./scripts/build-dmg.sh --adhoc   # ad-hoc 签名、跳过公证，无需证书（注意：后台写入助手不可用，见下）
 ```
 
 公证需要设置 `APPLE_API_KEY_ID`、`APPLE_API_ISSUER_ID` 和 `APPLE_API_KEY_PATH` 环境变量；只想跳过公证可传 `--skip-notarize`。产物输出到 `dist/` 目录，并附带 sha256 校验文件。
+
+> **注意签名方式**：后台写入助手通过 SMAppService 注册，而系统的“登录项与扩展”批准与代码签名身份绑定。ad-hoc 签名没有稳定身份，开关能打开但守护进程永远不会真正注册，App 会持续提示“后台写入助手不可用”。本地自用请用 `--dev`（钥匙串里有免费的 Apple Development 证书即可），正式发布用 Developer ID。
 
 ## 文档
 

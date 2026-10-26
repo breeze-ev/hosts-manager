@@ -1,8 +1,9 @@
 #!/bin/bash
-# Increment CURRENT_PROJECT_VERSION (build number) for all targets by 1.
+# Increment the local build number (CURRENT_PROJECT_VERSION) by 1.
+# The number lives in Config/BuildNumber.xcconfig, which is git-ignored.
 set -euo pipefail
 
-# Only bump on Release builds (archives); Debug builds leave the project untouched.
+# Only bump on Release builds (archives); Debug builds leave the file untouched.
 if [ "${CONFIGURATION:-Release}" != "Release" ]; then
     echo "Skipping build number bump (configuration: ${CONFIGURATION})"
     exit 0
@@ -14,20 +15,14 @@ if [ "${BUMP_BUILD_NUMBER:-1}" = "0" ]; then
     exit 0
 fi
 
-PBXPROJ="${SRCROOT:-$(cd "$(dirname "$0")/.." && pwd)}/hosts-manager.xcodeproj/project.pbxproj"
+ROOT="${SRCROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
+CONFIG="$ROOT/Config/BuildNumber.xcconfig"
 
-/usr/bin/env python3 - "$PBXPROJ" <<'EOF'
-import re, sys
+if [ ! -f "$CONFIG" ]; then
+    cp "$ROOT/Config/BuildNumber.xcconfig.example" "$CONFIG"
+fi
 
-path = sys.argv[1]
-with open(path) as f:
-    content = f.read()
-
-def bump(m):
-    return "CURRENT_PROJECT_VERSION = %d;" % (int(m.group(1)) + 1)
-
-content, n = re.subn(r"CURRENT_PROJECT_VERSION = (\d+);", bump, content)
-with open(path, "w") as f:
-    f.write(content)
-print("Bumped build number in %d places" % n)
-EOF
+current=$(sed -n 's/^CURRENT_PROJECT_VERSION = \([0-9]*\).*/\1/p' "$CONFIG")
+next=$((current + 1))
+sed -i '' "s/^CURRENT_PROJECT_VERSION = .*/CURRENT_PROJECT_VERSION = $next/" "$CONFIG"
+echo "Bumped build number: $current -> $next (applies to the next build)"

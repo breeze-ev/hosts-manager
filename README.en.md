@@ -86,8 +86,11 @@ For a source-only build, the helper may not install unless both the app and help
 
 ```bash
 ./scripts/build-dmg.sh           # Developer ID signed + notarized (requires a paid developer certificate)
-./scripts/build-dmg.sh --adhoc   # ad-hoc signed, no notarization, no certificate needed; good for local/beta distribution
+./scripts/build-dmg.sh --dev     # Apple Development signed, no notarization; recommended for local personal use
+./scripts/build-dmg.sh --adhoc   # ad-hoc signed, no notarization, no certificate needed (note: the background helper won't work, see below)
 ```
+
+> **Signing matters**: the background writer helper is registered via SMAppService, and macOS ties Login Items approval to the code-signing identity. Ad-hoc builds have no stable identity, so the toggle can be switched on but the daemon never actually registers, and the app keeps reporting "background helper unavailable". Use `--dev` for local builds (a free Apple Development certificate is enough) and Developer ID for release.
 
 Notarization requires the `APPLE_API_KEY_ID`, `APPLE_API_ISSUER_ID`, and `APPLE_API_KEY_PATH` environment variables; use `--skip-notarize` to skip it only. Artifacts are written to `dist/` with sha256 checksum files.
 

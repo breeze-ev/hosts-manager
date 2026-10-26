@@ -3,18 +3,42 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PBXPROJ="$ROOT_DIR/hosts-manager.xcodeproj/project.pbxproj"
+BUILD_NUMBER_CONFIG="$ROOT_DIR/Config/BuildNumber.xcconfig"
 
 # Defaults are read from the Xcode project so a bare `./scripts/build-dmg.sh` works.
 VERSION="${VERSION:-$(sed -n 's/.*MARKETING_VERSION = \([^;]*\);.*/\1/p' "$PBXPROJ" | head -1)}"
-BUILD_NUMBER="${BUILD_NUMBER:-$(sed -n 's/.*CURRENT_PROJECT_VERSION = \([^;]*\);.*/\1/p' "$PBXPROJ" | head -1)}"
+BUILD_NUMBER="${BUILD_NUMBER:-$(sed -n 's/^CURRENT_PROJECT_VERSION = \([0-9]*\).*/\1/p' "$BUILD_NUMBER_CONFIG" 2>/dev/null || echo 1)}"
 TEAM_ID="${TEAM_ID:-$(sed -n 's/.*DEVELOPMENT_TEAM = \([^;]*\);.*/\1/p' "$PBXPROJ" | head -1)}"
 SIGNING_IDENTITY="${SIGNING_IDENTITY:-Developer ID Application}"
 OUTPUT_DIR="${OUTPUT_DIR:-dist}"
 SKIP_NOTARIZE="${SKIP_NOTARIZE:-0}"
 ADHOC="${ADHOC:-0}"
+DEV="${DEV:-0}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
+    --help|-h)
+      cat <<'USAGE'
+Usage: build-dmg.sh [options]
+
+Signing modes (pick one):
+  (default)            Developer ID signing + notarization (paid certificate; for release)
+  --dev                Apple Development signing, skips notarization; stable identity so the
+                       SMAppService background helper works. Recommended for local use.
+  --adhoc              Ad-hoc signing, no certificate needed. WARNING: Login Items approval
+                       never sticks for ad-hoc builds, so the background helper stays
+                       unavailable. Only useful for UI testing.
+
+Other options:
+  --version V          Marketing version (default: read from the Xcode project)
+  --build-number N     Build number (default: read from the Xcode project)
+  --team-id ID         Development team ID (default: read from the Xcode project)
+  --signing-identity S Override the code signing identity
+  --output-dir DIR     Output directory (default: dist)
+  --skip-notarize      Build signed DMGs without notarizing
+USAGE
+      exit 0
+      ;;
     --version)
       VERSION="$2"
       shift 2
@@ -45,6 +69,15 @@ while [[ $# -gt 0 ]]; do
       SIGNING_IDENTITY="-"
       shift
       ;;
+    --dev)
+      # Sign with an Apple Development certificate. Unlike adhoc builds this
+      # gives the app a stable code-signing identity, so SMAppService login
+      # item approval sticks across launches.
+      DEV=1
+      SKIP_NOTARIZE=1
+      SIGNING_IDENTITY="Apple Development"
+      shift
+      ;;
     *)
       echo "Unknown option: $1" >&2
       exit 1
@@ -59,6 +92,23 @@ fi
 
 WORK_DIR="$(mktemp -d)"
 trap 'rm -rf "$WORK_DIR"' EXIT
+
+cat > "$WORK_DIR/export-options-dev.plist" <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>method</key>
+  <string>development</string>
+  <key>teamID</key>
+  <string>$TEAM_ID</string>
+  <key>signingStyle</key>
+  <string>manual</string>
+  <key>stripSwiftSymbols</key>
+  <true/>
+</dict>
+</plist>
+PLIST
 
 cat > "$WORK_DIR/export-options.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -105,6 +155,29 @@ for ARCH in arm64 x86_64; do
       ARCHS="$ARCH" \
       ONLY_ACTIVE_ARCH=NO
     APP_PATH="$ARCHIVE_PATH/Products/Applications/Hosts Manager.app"
+  elif [[ "$DEV" == "1" ]]; then
+    xcodebuild archive \
+      -project "$ROOT_DIR/hosts-manager.xcodeproj" \
+      -scheme hosts-manager \
+      -configuration Release \
+      -destination 'generic/platform=macOS' \
+      -archivePath "$ARCHIVE_PATH" \
+      -derivedDataPath "$WORK_DIR/DerivedData-${ARCH}" \
+      DEVELOPMENT_TEAM="$TEAM_ID" \
+      CODE_SIGN_IDENTITY="$SIGNING_IDENTITY" \
+      CODE_SIGN_STYLE=Manual \
+      MARKETING_VERSION="$VERSION" \
+      CURRENT_PROJECT_VERSION="$BUILD_NUMBER" \
+      BUMP_BUILD_NUMBER=0 \
+      ARCHS="$ARCH" \
+      ONLY_ACTIVE_ARCH=NO
+
+    echo "Exporting development-signed app [${ARCH}]..."
+    xcodebuild -exportArchive \
+      -archivePath "$ARCHIVE_PATH" \
+      -exportPath "$EXPORT_PATH" \
+      -exportOptionsPlist "$WORK_DIR/export-options-dev.plist"
+    APP_PATH="$EXPORT_PATH/Hosts Manager.app"
   else
     xcodebuild archive \
       -project "$ROOT_DIR/hosts-manager.xcodeproj" \
