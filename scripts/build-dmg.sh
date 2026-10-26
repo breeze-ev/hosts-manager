@@ -1,9 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-VERSION="${VERSION:-0.1.0}"
-BUILD_NUMBER="${BUILD_NUMBER:-1}"
-TEAM_ID="${TEAM_ID:-}"
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+PBXPROJ="$ROOT_DIR/hosts-manager.xcodeproj/project.pbxproj"
+
+# Defaults are read from the Xcode project so a bare `./scripts/build-dmg.sh` works.
+VERSION="${VERSION:-$(sed -n 's/.*MARKETING_VERSION = \([^;]*\);.*/\1/p' "$PBXPROJ" | head -1)}"
+BUILD_NUMBER="${BUILD_NUMBER:-$(sed -n 's/.*CURRENT_PROJECT_VERSION = \([^;]*\);.*/\1/p' "$PBXPROJ" | head -1)}"
+TEAM_ID="${TEAM_ID:-$(sed -n 's/.*DEVELOPMENT_TEAM = \([^;]*\);.*/\1/p' "$PBXPROJ" | head -1)}"
 SIGNING_IDENTITY="${SIGNING_IDENTITY:-Developer ID Application}"
 OUTPUT_DIR="${OUTPUT_DIR:-dist}"
 SKIP_NOTARIZE="${SKIP_NOTARIZE:-0}"
@@ -46,29 +50,8 @@ if [[ -z "$TEAM_ID" ]]; then
   exit 1
 fi
 
-ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 WORK_DIR="$(mktemp -d)"
 trap 'rm -rf "$WORK_DIR"' EXIT
-
-ARCHIVE_PATH="$WORK_DIR/HostsManager.xcarchive"
-EXPORT_PATH="$WORK_DIR/export"
-STAGING_PATH="$WORK_DIR/staging"
-DMG_NAME="Hosts-Manager-${VERSION}-universal.dmg"
-DMG_PATH="$ROOT_DIR/$OUTPUT_DIR/$DMG_NAME"
-
-echo "Archiving Hosts Manager v${VERSION} (${BUILD_NUMBER})..."
-xcodebuild archive \
-  -project "$ROOT_DIR/hosts-manager.xcodeproj" \
-  -scheme hosts-manager \
-  -configuration Release \
-  -destination 'generic/platform=macOS' \
-  -archivePath "$ARCHIVE_PATH" \
-  -derivedDataPath "$WORK_DIR/DerivedData" \
-  DEVELOPMENT_TEAM="$TEAM_ID" \
-  CODE_SIGN_IDENTITY="$SIGNING_IDENTITY" \
-  CODE_SIGN_STYLE=Manual \
-  MARKETING_VERSION="$VERSION" \
-  CURRENT_PROJECT_VERSION="$BUILD_NUMBER"
 
 cat > "$WORK_DIR/export-options.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -87,44 +70,73 @@ cat > "$WORK_DIR/export-options.plist" <<PLIST
 </plist>
 PLIST
 
-echo "Exporting signed app..."
-xcodebuild -exportArchive \
-  -archivePath "$ARCHIVE_PATH" \
-  -exportPath "$EXPORT_PATH" \
-  -exportOptionsPlist "$WORK_DIR/export-options.plist"
-
-APP_PATH="$EXPORT_PATH/Hosts Manager.app"
-HELPER_PATH="$APP_PATH/Contents/MacOS/HostsManagerHelper"
-
-echo "Verifying signatures and architectures..."
-codesign --verify --deep --strict --verbose=2 "$APP_PATH"
-codesign --verify --strict --verbose=2 "$HELPER_PATH"
-
-for binary in "$APP_PATH/Contents/MacOS/Hosts Manager" "$HELPER_PATH"; do
-  architectures="$(lipo -archs "$binary")"
-  if ! [[ "$architectures" =~ arm64 && "$architectures" =~ x86_64 ]]; then
-    echo "Expected universal arm64 + x86_64, got: $architectures" >&2
-    exit 1
-  fi
-done
-
-mkdir -p "$STAGING_PATH"
-ditto "$APP_PATH" "$STAGING_PATH/Hosts Manager.app"
-ln -s /Applications "$STAGING_PATH/Applications"
-
 mkdir -p "$ROOT_DIR/$OUTPUT_DIR"
-echo "Creating DMG..."
-hdiutil create \
-  -volname "Hosts Manager" \
-  -srcfolder "$STAGING_PATH" \
-  -ov \
-  -format UDZO \
-  "$DMG_PATH"
 
-shasum -a 256 "$DMG_PATH" > "$DMG_PATH.sha256"
+DMG_PATHS=()
+
+for ARCH in arm64 x86_64; do
+  ARCHIVE_PATH="$WORK_DIR/HostsManager-${ARCH}.xcarchive"
+  EXPORT_PATH="$WORK_DIR/export-${ARCH}"
+  STAGING_PATH="$WORK_DIR/staging-${ARCH}"
+  DMG_PATH="$ROOT_DIR/$OUTPUT_DIR/Hosts-Manager-${VERSION}-${ARCH}.dmg"
+
+  echo "Archiving Hosts Manager v${VERSION} (${BUILD_NUMBER}) [${ARCH}]..."
+  xcodebuild archive \
+    -project "$ROOT_DIR/hosts-manager.xcodeproj" \
+    -scheme hosts-manager \
+    -configuration Release \
+    -destination 'generic/platform=macOS' \
+    -archivePath "$ARCHIVE_PATH" \
+    -derivedDataPath "$WORK_DIR/DerivedData-${ARCH}" \
+    DEVELOPMENT_TEAM="$TEAM_ID" \
+    CODE_SIGN_IDENTITY="$SIGNING_IDENTITY" \
+    CODE_SIGN_STYLE=Manual \
+    MARKETING_VERSION="$VERSION" \
+    CURRENT_PROJECT_VERSION="$BUILD_NUMBER" \
+    BUMP_BUILD_NUMBER=0 \
+    ARCHS="$ARCH" \
+    ONLY_ACTIVE_ARCH=NO
+
+  echo "Exporting signed app [${ARCH}]..."
+  xcodebuild -exportArchive \
+    -archivePath "$ARCHIVE_PATH" \
+    -exportPath "$EXPORT_PATH" \
+    -exportOptionsPlist "$WORK_DIR/export-options.plist"
+
+  APP_PATH="$EXPORT_PATH/Hosts Manager.app"
+  HELPER_PATH="$APP_PATH/Contents/MacOS/HostsManagerHelper"
+
+  echo "Verifying signatures and architecture [${ARCH}]..."
+  codesign --verify --deep --strict --verbose=2 "$APP_PATH"
+  codesign --verify --strict --verbose=2 "$HELPER_PATH"
+
+  for binary in "$APP_PATH/Contents/MacOS/Hosts Manager" "$HELPER_PATH"; do
+    architectures="$(lipo -archs "$binary")"
+    if [[ "$architectures" != "$ARCH" ]]; then
+      echo "Expected single-arch ${ARCH}, got: ${architectures}" >&2
+      exit 1
+    fi
+  done
+
+  mkdir -p "$STAGING_PATH"
+  ditto "$APP_PATH" "$STAGING_PATH/Hosts Manager.app"
+  ln -s /Applications "$STAGING_PATH/Applications"
+
+  echo "Creating DMG [${ARCH}]..."
+  hdiutil create \
+    -volname "Hosts Manager" \
+    -srcfolder "$STAGING_PATH" \
+    -ov \
+    -format UDZO \
+    "$DMG_PATH"
+
+  shasum -a 256 "$DMG_PATH" > "$DMG_PATH.sha256"
+  DMG_PATHS+=("$DMG_PATH")
+done
 
 if [[ "$SKIP_NOTARIZE" == "1" ]]; then
   echo "Skipping notarization."
+  printf 'Built %s\n' "${DMG_PATHS[@]}"
   exit 0
 fi
 
@@ -133,16 +145,18 @@ if [[ -z "${APPLE_API_KEY_ID:-}" || -z "${APPLE_API_ISSUER_ID:-}" || -z "${APPLE
   exit 1
 fi
 
-echo "Submitting for notarization..."
-xcrun notarytool submit "$DMG_PATH" \
-  --wait \
-  --key-id "$APPLE_API_KEY_ID" \
-  --issuer "$APPLE_API_ISSUER_ID" \
-  --key "$APPLE_API_KEY_PATH" \
-  --team-id "$TEAM_ID"
+for DMG_PATH in "${DMG_PATHS[@]}"; do
+  echo "Submitting for notarization: $DMG_PATH"
+  xcrun notarytool submit "$DMG_PATH" \
+    --wait \
+    --key-id "$APPLE_API_KEY_ID" \
+    --issuer "$APPLE_API_ISSUER_ID" \
+    --key "$APPLE_API_KEY_PATH" \
+    --team-id "$TEAM_ID"
 
-echo "Stapling and validating..."
-xcrun stapler staple "$DMG_PATH"
-spctl --assess --type execute --verbose=4 "$DMG_PATH" || true
+  echo "Stapling and validating..."
+  xcrun stapler staple "$DMG_PATH"
+  spctl --assess --type execute --verbose=4 "$DMG_PATH" || true
+done
 
-echo "Built $DMG_PATH"
+printf 'Built %s\n' "${DMG_PATHS[@]}"

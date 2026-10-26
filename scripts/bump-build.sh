@@ -8,6 +8,12 @@ if [ "${CONFIGURATION:-Release}" != "Release" ]; then
     exit 0
 fi
 
+# Packaging scripts pin the build number explicitly; don't auto-bump there.
+if [ "${BUMP_BUILD_NUMBER:-1}" = "0" ]; then
+    echo "Skipping build number bump (BUMP_BUILD_NUMBER=0)"
+    exit 0
+fi
+
 PBXPROJ="${SRCROOT:-$(cd "$(dirname "$0")/.." && pwd)}/hosts-manager.xcodeproj/project.pbxproj"
 
 /usr/bin/env python3 - "$PBXPROJ" <<'EOF'
