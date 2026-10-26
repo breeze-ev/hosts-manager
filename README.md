@@ -35,12 +35,12 @@
 
 ## 安装说明
 
-从 [Releases](https://github.com/breeze-ev/hosts-manager/releases) 页面下载与你的 Mac 芯片匹配的 DMG（当前为 0.1.0-beta）：
+从 [Releases](https://github.com/breeze-ev/hosts-manager/releases) 页面下载与你的 Mac 芯片匹配的 DMG：
 
 | 文件 | 适用机型 |
 | --- | --- |
-| `Hosts-Manager-0.1.0-beta-6-arm64.dmg` | Apple Silicon（M 系列芯片） |
-| `Hosts-Manager-0.1.0-beta-6-x86_64.dmg` | Intel 芯片 |
+| `Hosts-Manager-*-arm64.dmg` | Apple Silicon（M 系列芯片） |
+| `Hosts-Manager-*-x86_64.dmg` | Intel 芯片 |
 
 不确定芯片型号？点击左上角苹果菜单 → 关于本机，"芯片"一栏显示 Apple M 系列则下载 arm64，显示 Intel 则下载 x86_64。
 
@@ -49,8 +49,6 @@
 1. 双击打开下载的 DMG 文件。
 2. 将 **Hosts Manager** 拖入 **Applications** 文件夹。
 3. 从"应用程序"中启动 Hosts Manager。
-
-beta 版本为 ad-hoc 签名、未经公证，首次打开会被 Gatekeeper 拦截：在"访达"中右键点击应用并选择"打开"，再在弹窗中确认"打开"即可；也可以执行 `xattr -d com.apple.quarantine /Applications/Hosts\ Manager.app` 移除隔离属性。
 
 ## 从源码构建
 

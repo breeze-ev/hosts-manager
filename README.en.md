@@ -35,12 +35,12 @@ Manage `/etc/hosts` with profiles: structured list editing, source editing, real
 
 ## Installation
 
-Download the DMG matching your Mac from the [Releases](https://github.com/breeze-ev/hosts-manager/releases) page (currently 0.1.0-beta):
+Download the DMG matching your Mac from the [Releases](https://github.com/breeze-ev/hosts-manager/releases) page:
 
 | File | Mac |
 | --- | --- |
-| `Hosts-Manager-0.1.0-beta-6-arm64.dmg` | Apple Silicon (M-series) |
-| `Hosts-Manager-0.1.0-beta-6-x86_64.dmg` | Intel |
+| `Hosts-Manager-*-arm64.dmg` | Apple Silicon (M-series) |
+| `Hosts-Manager-*-x86_64.dmg` | Intel |
 
 Not sure which one? Open the Apple menu → About This Mac: "Chip" shows an Apple M-series for arm64, or Intel for x86_64.
 
@@ -49,8 +49,6 @@ To install:
 1. Open the downloaded DMG.
 2. Drag **Hosts Manager** into the **Applications** folder.
 3. Launch Hosts Manager from Applications.
-
-The beta builds are ad-hoc signed and not notarized, so Gatekeeper blocks the first launch: right-click the app in Finder, choose **Open**, then confirm. You can also run `xattr -d com.apple.quarantine /Applications/Hosts\ Manager.app` to remove the quarantine attribute.
 
 ## Build from Source
 
