@@ -147,9 +147,9 @@ struct HelperContractTests {
     @Test func xpcInterfaceAndClientRequirementAreConfigured() {
         let interface = NSXPCInterface(with: HostsHelperServiceProtocol.self)
         _ = interface
-        let requirement = HostsHelperConstants.clientCodeRequirement(teamIdentifier: "TESTTEAM")
+        let requirement = HostsHelperConstants.clientCodeRequirement
         #expect(requirement.contains("personal.hosts-manager"))
-        #expect(requirement.contains("TESTTEAM"))
+        #expect(requirement.contains("Y724PV6L7L"))
         #expect(requirement.contains("anchor apple generic"))
     }
 }

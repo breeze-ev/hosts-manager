@@ -4,14 +4,12 @@ enum HostsHelperConstants {
     static let serviceName = "com.breeze.hostsmanager.helper"
     static let daemonPlistName = "com.breeze.hostsmanager.helper.plist"
     static let clientBundleIdentifier = "personal.hosts-manager"
-
-    static func clientCodeRequirement(teamIdentifier: String) -> String {
-        """
-        anchor apple generic
-        and identifier "\(clientBundleIdentifier)"
-        and certificate leaf[subject.OU] = "\(teamIdentifier)"
-        """
-    }
+    static let teamIdentifier = "Y724PV6L7L"
+    static let clientCodeRequirement = """
+    anchor apple generic
+    and identifier "\(clientBundleIdentifier)"
+    and certificate leaf[subject.OU] = "\(teamIdentifier)"
+    """
 }
 
 enum HostsHelperErrorCode: Int32 {
