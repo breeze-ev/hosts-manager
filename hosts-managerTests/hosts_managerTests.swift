@@ -343,6 +343,85 @@ struct AtomicWriterTests {
     }
 }
 
+struct HostsImportTests {
+    @Test func importsUserEntriesAndSuggestsFileName() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let file = directory.appendingPathComponent("project.hosts")
+        try """
+        127.0.0.1 localhost
+        10.0.0.8 imported.local # imported
+        # 10.0.0.9 disabled.local
+        """.write(to: file, atomically: true, encoding: .utf8)
+
+        let result = try HostsImport.load(from: file)
+
+        #expect(result.suggestedProfileName == "project")
+        #expect(result.entries.count == 2)
+        #expect(result.entries[0].hostnames == ["imported.local"])
+        #expect(result.entries[0].desc == "imported")
+        #expect(!result.entries[1].isEnabled)
+    }
+
+    @Test func importsUTF8BOMFile() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let file = directory.appendingPathComponent("windows.hosts")
+        var data = Data([0xEF, 0xBB, 0xBF])
+        data.append(contentsOf: "10.0.0.10 bom.local\n".utf8)
+        try data.write(to: file)
+
+        let result = try HostsImport.load(from: file)
+
+        #expect(result.entries.count == 1)
+        #expect(result.entries[0].hostnames == ["bom.local"])
+    }
+
+    @Test func rejectsInvalidEncodingAndOversizedFiles() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let invalidUTF8 = directory.appendingPathComponent("invalid.hosts")
+        try Data([0xFF, 0xFE]).write(to: invalidUTF8)
+        #expect(throws: HostsImportError.self) {
+            try HostsImport.load(from: invalidUTF8)
+        }
+
+        let oversized = directory.appendingPathComponent("oversized.hosts")
+        try Data(count: HostsImport.maximumFileSize + 1).write(to: oversized)
+        #expect(throws: HostsImportError.self) {
+            try HostsImport.load(from: oversized)
+        }
+    }
+
+    @Test func rejectsInvalidContentAndFilesWithoutUserEntries() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let invalid = directory.appendingPathComponent("invalid-content.hosts")
+        try "123abc bad.local\n".write(to: invalid, atomically: true, encoding: .utf8)
+        #expect(throws: HostsImportError.self) {
+            try HostsImport.load(from: invalid)
+        }
+
+        let systemOnly = directory.appendingPathComponent("system-only.hosts")
+        try "127.0.0.1 localhost\n".write(to: systemOnly, atomically: true, encoding: .utf8)
+        #expect(throws: HostsImportError.self) {
+            try HostsImport.load(from: systemOnly)
+        }
+    }
+}
+
 @MainActor
 struct WriteCoordinatorTests {
     @Test func createsBackupAndVerifiesWrittenContent() async throws {

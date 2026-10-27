@@ -626,6 +626,9 @@ struct ContentView: View {
                 .fixedSize()
 
                 Menu {
+                    Button(l10n.s("从文件导入配置…", "Import Profile from File…"), systemImage: "doc.badge.plus") {
+                        importProfileFromFile()
+                    }
                     Button(l10n.s("导入当前 hosts", "Import Current Hosts"), systemImage: "square.and.arrow.down") {
                         importCurrentHosts()
                     }
@@ -1181,6 +1184,65 @@ struct ContentView: View {
             return last.id
         }
         return selectedProfile?.id
+    }
+
+    private func importProfileFromFile() {
+        let panel = NSOpenPanel()
+        panel.title = l10n.s("从文件导入配置", "Import Profile from File")
+        panel.message = l10n.s(
+            "选择一个 hosts 文本文件。导入后会创建为未应用配置，不会修改系统文件。",
+            "Choose a hosts text file. It will be imported as an unapplied profile without changing the system file."
+        )
+        panel.prompt = l10n.s("导入", "Import")
+        panel.allowedContentTypes = HostsImport.allowedContentTypes
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.resolvesAliases = true
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+
+        do {
+            let imported = try HostsImport.load(from: url)
+            let profile = Profile(context: context)
+            profile.id = UUID()
+            profile.name = l10n.s(
+                "导入 \(imported.suggestedProfileName)",
+                "Imported \(imported.suggestedProfileName)"
+            )
+            profile.setApplied(false)
+            profile.createdAt = Date()
+            profile.updatedAt = Date()
+            addEntries(imported.entries, to: profile)
+            try context.save()
+            selectedProfileID = profile.id
+            selection = .profiles
+            mode = .list
+            pendingScrollProfileID = profile.id
+        } catch let error as HostsImportError {
+            context.rollback()
+            operationError = importErrorMessage(error)
+        } catch {
+            context.rollback()
+            operationError = localizedError(error)
+        }
+    }
+
+    private func importErrorMessage(_ error: HostsImportError) -> String {
+        switch error {
+        case .unreadable:
+            return l10n.s("无法读取所选文件。", "The selected file could not be read.")
+        case .tooLarge:
+            return l10n.s("文件超过 1 MiB，无法导入。", "The file exceeds the 1 MiB import limit.")
+        case .invalidEncoding:
+            return l10n.s("文件不是有效的 UTF-8 文本。", "The file is not valid UTF-8 text.")
+        case .invalidContent:
+            return l10n.s(
+                "文件包含无效的 IP 地址、主机名或控制字符。",
+                "The file contains an invalid IP address, hostname, or control character."
+            )
+        case .noUserEntries:
+            return l10n.s("文件中没有可导入的用户条目。", "The file does not contain any user entries to import.")
+        }
     }
 
     private func importCurrentHosts() {
