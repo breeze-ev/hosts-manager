@@ -3763,7 +3763,6 @@ struct SettingsView: View {
                     ))
                     .font(.system(size: 12))
                     .foregroundStyle(.secondary)
-                    updateStatusText
                 }
                 Spacer()
                 Button {
@@ -3784,88 +3783,11 @@ struct SettingsView: View {
                 .accessibilityIdentifier("settings-check-for-updates")
             }
 
-            switch updateCenter.phase {
-            case .downloading(_, let progress):
-                ProgressView(value: progress)
-                    .progressViewStyle(.linear)
-                    .accessibilityIdentifier("settings-update-progress")
-            case .downloaded(_, _, let checksum, _, _):
-                Label(
-                    checksum == .verified
-                        ? l10n.s("SHA-256 校验通过", "SHA-256 verified")
-                        : l10n.s("校验文件缺失，交由 Gatekeeper 检查", "Checksum unavailable; Gatekeeper will inspect it"),
-                    systemImage: "checkmark.shield"
-                )
-                .font(.system(size: 11.5))
-                .foregroundStyle(.secondary)
-                Button(l10n.s("显示已下载的安装包", "Show Downloaded Installer")) {
-                    updateCenter.revealDownloadedFile()
-                }
-                .buttonStyle(.link)
-                .font(.system(size: 12))
-            default:
-                EmptyView()
-            }
-
-            if let lastCheckDate = updateCenter.lastCheckDate {
-                Text(l10n.s(
-                    "上次检查：\(lastCheckDate.formatted(date: .abbreviated, time: .shortened))",
-                    "Last checked: \(lastCheckDate.formatted(date: .abbreviated, time: .shortened))"
-                ))
-                .font(.system(size: 12))
-                .foregroundStyle(.secondary)
-            }
         }
         .padding(12)
         .background(RoundedRectangle(cornerRadius: 12).fill(.quaternary.opacity(0.12)))
         .overlay(RoundedRectangle(cornerRadius: 12).stroke(.quaternary.opacity(0.4)))
         .accessibilityIdentifier("software-update-card")
-    }
-
-    @ViewBuilder
-    private var updateStatusText: some View {
-        switch updateCenter.phase {
-        case .checking:
-            Text(l10n.s("正在检查更新…", "Checking for updates…"))
-                .font(.system(size: 12))
-                .foregroundStyle(.secondary)
-        case .downloading(_, let progress):
-            Text(l10n.s(
-                "正在下载：\(Int(progress * 100))%",
-                "Downloading: \(Int(progress * 100))%"
-            ))
-            .font(.system(size: 12))
-            .foregroundStyle(.secondary)
-        case .downloadFailed:
-            Text(l10n.s(
-                "下载失败，可重试或打开发布页。",
-                "Download failed. Retry or open the release page."
-            ))
-            .font(.system(size: 12))
-            .foregroundStyle(.orange)
-        case .available(let release):
-            Text(l10n.s(
-                "发现新版本 \(release.version.displayString)。",
-                "Version \(release.version.displayString) is available."
-            ))
-            .font(.system(size: 12))
-            .foregroundStyle(Color.accentColor)
-        case .failed:
-            Text(l10n.s(
-                "上次检查失败。可重试或打开发布页。",
-                "The last check failed. Retry or open the release page."
-            ))
-            .font(.system(size: 12))
-            .foregroundStyle(.orange)
-        case .upToDate:
-            Text(l10n.s("已是最新版本。", "You’re up to date."))
-                .font(.system(size: 12))
-                .foregroundStyle(.secondary)
-        case .downloaded:
-            EmptyView()
-        default:
-            EmptyView()
-        }
     }
 
     private func installMessageView(_ message: String) -> some View {
