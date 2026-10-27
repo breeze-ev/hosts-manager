@@ -375,6 +375,10 @@ nonisolated enum UpdateFileNaming {
     }
 }
 
+extension Notification.Name {
+    static let closeUpdateWindow = Notification.Name("UpdateCenterCloseWindow")
+}
+
 nonisolated final class URLSessionUpdateTransport: UpdateTransport {
     nonisolated private let apiSession: URLSession
     nonisolated private let downloadSession: URLSession
@@ -753,6 +757,7 @@ final class UpdateCenter: ObservableObject {
 
     func publishPanelDismissal() {
         panelDidDismiss()
+        NotificationCenter.default.post(name: .closeUpdateWindow, object: nil)
     }
 
     func setPresentationBlocked(_ blocked: Bool, autoPresentOnUnblock: Bool = true) {
@@ -1153,6 +1158,11 @@ struct UpdateSheet: View {
             }
         }
         .frame(width: 620, height: 540)
+        .onDisappear {
+            if updateCenter.isPanelPresented {
+                updateCenter.panelDidDismiss()
+            }
+        }
         .accessibilityIdentifier("update-panel")
     }
 

@@ -31,6 +31,7 @@ struct HostsManagerApp: App {
     @StateObject private var l10n = Localization()
     @StateObject private var updateCenter = UpdateCenter.forCurrentProcess()
     @AppStorage("language") private var language = "system"
+    @Environment(\.dismissWindow) private var dismissWindow
 
     private var isEnglish: Bool {
         LocalizationPreference.isEnglish(for: language)
@@ -86,5 +87,14 @@ struct HostsManagerApp: App {
                 .keyboardShortcut(",", modifiers: .command)
             }
         }
+
+        Window("Software Update", id: "software-update") {
+            UpdateSheet(updateCenter: updateCenter)
+                .environmentObject(l10n)
+                .onReceive(NotificationCenter.default.publisher(for: .closeUpdateWindow)) { _ in
+                    dismissWindow(id: "software-update")
+                }
+        }
+        .windowResizability(.contentSize)
     }
 }

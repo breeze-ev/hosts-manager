@@ -312,6 +312,7 @@ private struct OperationErrorAlert: ViewModifier {
 
 struct ContentView: View {
     @Environment(\.managedObjectContext) private var context
+    @Environment(\.openWindow) private var openWindow
     @FetchRequest(sortDescriptors: [
         NSSortDescriptor(keyPath: \Profile.isSystem, ascending: false),
         NSSortDescriptor(keyPath: \Profile.createdAt, ascending: true)
@@ -327,7 +328,6 @@ struct ContentView: View {
     @State private var didApplyDefaultMode = false
     @State private var showApply = false
     @State private var applyDraftText: String?
-    @State private var isUpdatePanelPresented = false
     @State private var query = ""
     @State private var sourceDrafts: [UUID: String] = [:]
     /// 源码草稿与列表内容发生冲突的配置：草稿不会被静默丢弃，而是标记出来让用户决定。
@@ -387,6 +387,16 @@ struct ContentView: View {
         .toolbar { toolbarContent }
         .toolbarBackground(.hidden, for: .windowToolbar)
         .buttonBorderShape(.capsule)
+        .onChange(of: updateCenter.isPanelPresented) { _, isPresented in
+            if isPresented {
+                openWindow(id: "software-update")
+            }
+        }
+        .onAppear {
+            if updateCenter.isPanelPresented {
+                openWindow(id: "software-update")
+            }
+        }
         .sheet(isPresented: $showApply, onDismiss: { applyDraftText = nil }) {
             if let profile = selectedProfile {
                 ApplySheet(
@@ -395,17 +405,6 @@ struct ContentView: View {
                     expectedCurrentFingerprint: lastKnownHostsFingerprint
                 )
             }
-        }
-        .sheet(isPresented: $isUpdatePanelPresented, onDismiss: {
-            updateCenter.panelDidDismiss()
-        }) {
-            UpdateSheet(updateCenter: updateCenter)
-        }
-        .onChange(of: updateCenter.isPanelPresented) { _, isPresented in
-            isUpdatePanelPresented = isPresented
-        }
-        .onAppear {
-            isUpdatePanelPresented = updateCenter.isPanelPresented
         }
         .sheet(isPresented: $showHelperGuide) {
             HelperGuideSheet(onClose: { showHelperGuide = false })
