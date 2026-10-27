@@ -197,7 +197,10 @@ nonisolated struct GitHubRelease: Decodable, Equatable, Sendable {
 nonisolated protocol UpdateTransport: Sendable {
     func fetchLatestRelease() async throws -> GitHubRelease?
     func fetchData(from url: URL) async throws -> Data
-    func download(from url: URL, progress: @escaping (Double) -> Void) async throws -> URL
+    func download(
+        from url: URL,
+        progress: @escaping @Sendable (Double) -> Void
+    ) async throws -> URL
 }
 
 nonisolated enum UpdateReleaseMapper {
@@ -490,7 +493,7 @@ nonisolated final class URLSessionUpdateTransport: UpdateTransport {
 
     func download(
         from url: URL,
-        progress: @escaping (Double) -> Void
+        progress: @escaping @Sendable (Double) -> Void
     ) async throws -> URL {
         var request = URLRequest(url: url)
         request.timeoutInterval = 300
@@ -516,7 +519,7 @@ nonisolated final class URLSessionUpdateTransport: UpdateTransport {
     }
 }
 
-private final class UpdateDownloadDelegate: NSObject, URLSessionTaskDelegate, URLSessionDownloadDelegate {
+nonisolated final class UpdateDownloadDelegate: NSObject, URLSessionTaskDelegate, URLSessionDownloadDelegate {
     private let progress: (Double) -> Void
 
     init(progress: @escaping (Double) -> Void) {
@@ -916,7 +919,12 @@ final class UpdateCenter: ObservableObject {
         phase = .downloading(release, progress: 0)
 
         do {
+            var lastProgressDate = Date.distantPast
             let downloadedURL = try await transport.download(from: asset.url) { [weak self] fraction in
+                let now = Date()
+                let shouldReport = fraction >= 1 || now.timeIntervalSince(lastProgressDate) >= 0.05
+                guard shouldReport else { return }
+                lastProgressDate = now
                 Task { @MainActor in
                     guard let self,
                           self.activeDownloadID == downloadID,
@@ -1125,7 +1133,10 @@ private final class UITestUpdateTransport: UpdateTransport {
         throw URLError(.fileDoesNotExist)
     }
 
-    func download(from url: URL, progress: @escaping (Double) -> Void) async throws -> URL {
+    func download(
+        from url: URL,
+        progress: @escaping @Sendable (Double) -> Void
+    ) async throws -> URL {
         if mode == "downloadFailure" {
             throw URLError(.networkConnectionLost)
         }

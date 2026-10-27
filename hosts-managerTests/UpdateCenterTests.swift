@@ -783,7 +783,7 @@ private actor StubUpdateTransport: UpdateTransport {
 
     func download(
         from url: URL,
-        progress: @escaping (Double) -> Void
+        progress: @escaping @Sendable (Double) -> Void
     ) async throws -> URL {
         downloadCount += 1
         progress(0.5)
