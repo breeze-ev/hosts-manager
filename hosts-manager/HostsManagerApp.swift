@@ -95,6 +95,7 @@ struct HostsManagerApp: App {
                     dismissWindow(id: "software-update")
                 }
         }
+        .windowStyle(.hiddenTitleBar)
         .windowResizability(.contentSize)
     }
 }
