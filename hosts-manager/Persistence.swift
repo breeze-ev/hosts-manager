@@ -77,10 +77,18 @@ final class PersistenceController: ObservableObject {
     /// read-only "系统" profile plus at least one editable custom profile.
     func ensureDefaults() throws {
         let context = container.viewContext
-        let all = try context.fetch(Profile.fetchRequest())
+        do {
+            try ensureDefaults(in: context)
+        } catch {
+            context.rollback()
+            throw error
+        }
+    }
 
+    private func ensureDefaults(in context: NSManagedObjectContext) throws {
+        let all = try context.fetch(Profile.fetchRequest())
         if all.isEmpty {
-            try seed()
+            try seed(in: context)
             return
         }
 
@@ -143,6 +151,15 @@ final class PersistenceController: ObservableObject {
 
     func seed() throws {
         let context = container.viewContext
+        do {
+            try seed(in: context)
+        } catch {
+            context.rollback()
+            throw error
+        }
+    }
+
+    private func seed(in context: NSManagedObjectContext) throws {
         guard try context.count(for: Profile.fetchRequest()) == 0 else { return }
 
         // Read-only system profile: always shows the live /etc/hosts.
@@ -186,7 +203,11 @@ final class PersistenceController: ObservableObject {
     }
 
     private func addEntry(to profile: Profile, ip: String, hosts: [String], desc: String, enabled: Bool, system: Bool) {
-        let entry = HostEntry(context: container.viewContext)
+        guard let context = profile.managedObjectContext else {
+            assertionFailure("A profile must belong to a context before adding entries.")
+            return
+        }
+        let entry = HostEntry(context: context)
         entry.id = UUID()
         entry.profile = profile
         entry.ip = ip

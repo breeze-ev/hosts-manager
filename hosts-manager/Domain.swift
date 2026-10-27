@@ -131,6 +131,59 @@ enum HostValidator {
     }
 }
 
+enum HostsReconciliationState: Equatable {
+    case noActiveProfiles
+    case inSync
+    case externalContent
+    case unreadable
+}
+
+enum HostsReconciliation {
+    /// Compares the live file with the content produced by the currently
+    /// applied profiles. The comparison is canonical so formatting or comment
+    /// changes do not produce a false external-edit warning.
+    static func inspect(
+        liveContent: String?,
+        expectedContent: String,
+        hasActiveProfiles: Bool
+    ) -> HostsReconciliationState {
+        guard hasActiveProfiles else { return .noActiveProfiles }
+        guard let liveContent else { return .unreadable }
+        return canonical(liveContent) == canonical(expectedContent)
+            ? .inSync
+            : .externalContent
+    }
+
+    static func canonical(_ content: String) -> String {
+        var mappings = Set<String>()
+        for entry in HostsParser.parse(content) where entry.isEnabled {
+            for hostname in entry.hostnames {
+                mappings.insert("\(entry.ip)|\(hostname.lowercased())")
+            }
+        }
+        return mappings.sorted().joined(separator: "\n")
+    }
+
+    static func requiresReconciliation(
+        liveContent: String?,
+        lastKnownFingerprint: String?,
+        stateCommitFailed: Bool
+    ) -> Bool {
+        if stateCommitFailed {
+            return true
+        }
+        guard let liveContent else {
+            return false
+        }
+        guard let lastKnownFingerprint else {
+            // With no trusted baseline, the current file cannot be proven to
+            // match the persisted applied state.
+            return true
+        }
+        return canonical(liveContent) != lastKnownFingerprint
+    }
+}
+
 nonisolated enum HostIssueKind: Equatable { case conflict, duplicate }
 
 struct HostIssue: Identifiable {

@@ -72,6 +72,16 @@ extension Profile {
     }
 }
 
+@MainActor
+func clearAppliedStateForUserProfiles(in context: NSManagedObjectContext) throws {
+    let profiles = try context.fetch(Profile.fetchRequest())
+    let now = Date()
+    for profile in profiles where !profile.isSystem {
+        profile.setApplied(false)
+        profile.updatedAt = now
+    }
+}
+
 extension HostEntry {
     @nonobjc class func fetchRequest() -> NSFetchRequest<HostEntry> {
         NSFetchRequest<HostEntry>(entityName: "HostEntry")

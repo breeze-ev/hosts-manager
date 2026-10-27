@@ -143,6 +143,83 @@ struct HostValidatorTests {
     }
 }
 
+struct HostsReconciliationTests {
+    @Test func canonicalComparisonIgnoresFormattingAndOrdering() {
+        let live = """
+        10.0.0.2   DB.LOCAL api.local # database
+        10.0.0.1   api.local # local API
+        """
+        let expected = """
+        # managed by the app
+        10.0.0.2 api.local db.local # database
+        10.0.0.1 api.local # local API
+        """
+
+        #expect(
+            HostsReconciliation.inspect(
+                liveContent: live,
+                expectedContent: expected,
+                hasActiveProfiles: true
+            ) == .inSync
+        )
+    }
+
+    @Test func detectsExternalContentAndUnreadableFile() {
+        let expected = "10.0.0.1 api.local\n"
+        #expect(
+            HostsReconciliation.inspect(
+                liveContent: "10.0.0.2 api.local\n",
+                expectedContent: expected,
+                hasActiveProfiles: true
+            ) == .externalContent
+        )
+        #expect(
+            HostsReconciliation.inspect(
+                liveContent: nil,
+                expectedContent: expected,
+                hasActiveProfiles: true
+            ) == .unreadable
+        )
+    }
+
+    @Test func noActiveProfilesSkipsReconciliationWarning() {
+        #expect(
+            HostsReconciliation.inspect(
+                liveContent: "10.0.0.9 external.local\n",
+                expectedContent: "",
+                hasActiveProfiles: false
+            ) == .noActiveProfiles
+        )
+    }
+
+    @Test func reconciliationRequiresTrustedBaselineOrMatchingFile() {
+        let content = "10.0.0.1 api.local\n"
+        let fingerprint = HostsReconciliation.canonical(content)
+
+        #expect(
+            HostsReconciliation.requiresReconciliation(
+                liveContent: content,
+                lastKnownFingerprint: fingerprint,
+                stateCommitFailed: false
+            ) == false
+        )
+        #expect(
+            HostsReconciliation.requiresReconciliation(
+                liveContent: content,
+                lastKnownFingerprint: nil,
+                stateCommitFailed: false
+            )
+        )
+        #expect(
+            HostsReconciliation.requiresReconciliation(
+                liveContent: content,
+                lastKnownFingerprint: fingerprint,
+                stateCommitFailed: true
+            )
+        )
+    }
+}
+
 @MainActor
 struct ProfileAppliedStateTests {
     @Test func setAppliedKeepsCompatibilityMirrorInSync() throws {
@@ -181,6 +258,24 @@ struct ProfileAppliedStateTests {
 
         profile.synchronizeAppliedMirror()
         #expect(profile.isAppliedForSystem)
+    }
+
+    @Test func clearingAppliedStateLeavesSystemProfileDisabled() throws {
+        let controller = PersistenceController(inMemory: true)
+        let context = controller.container.viewContext
+        let profiles = try context.fetch(Profile.fetchRequest())
+        guard let custom = profiles.first(where: { !$0.isSystem }) else {
+            Issue.record("Expected a custom profile")
+            return
+        }
+        custom.setApplied(true)
+        try context.save()
+
+        try clearAppliedStateForUserProfiles(in: context)
+        try context.save()
+
+        #expect(!custom.isAppliedForSystem)
+        #expect(profiles.filter(\.isSystem).allSatisfy { !$0.isAppliedForSystem })
     }
 }
 

@@ -25,6 +25,8 @@ struct HostsWriteCommitError: Error {
     let underlying: Error
 }
 
+struct HostsWriteStateReconciliationError: Error {}
+
 struct SystemHostsFileAccess: HostsFileAccess {
     func read() throws -> String {
         try HostsWriter.readContent()
@@ -117,7 +119,7 @@ final class HostsWriteCoordinator: ObservableObject {
         guard verifiedContent == content else {
             throw HostsWriteError.verificationFailed
         }
-        NotificationCenter.default.post(name: .hostsContentChanged, object: nil)
+        NotificationCenter.default.post(name: .hostsContentChanged, object: content)
         return HostsWriteResult(content: content, backupURL: backupURL)
     }
 }
