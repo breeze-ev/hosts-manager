@@ -1,6 +1,6 @@
 # Privacy
 
-Hosts Manager is designed to work entirely on your Mac.
+Hosts Manager is designed to keep your data on your Mac.
 
 ## Data Access
 
@@ -10,7 +10,9 @@ Hosts Manager is designed to work entirely on your Mac.
 
 ## Network and Telemetry
 
-- The app makes no network requests.
+- The app checks GitHub Releases automatically at most once every 24 hours, and when you choose **Check for Updates** from the app menu or Settings.
+- The update check requests `https://api.github.com/repos/breeze-ev/hosts-manager/releases/latest` without authentication. If you choose to install an update, the app downloads the matching DMG and, when available, its `.sha256` file from the URLs published in that GitHub release.
+- These requests necessarily disclose standard network information, such as your IP address, to GitHub. GitHub's own privacy terms apply. Profiles, hosts content, backups, and settings are never included in update requests.
 - The app does not collect usage telemetry.
 - The app does not include third-party analytics or advertising SDKs.
 

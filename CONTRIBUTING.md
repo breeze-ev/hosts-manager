@@ -21,7 +21,7 @@ xcodebuild test \
 - Keep changes scoped to the behavior or area described in the issue.
 - Preserve the existing SwiftUI design language and bilingual copy.
 - Add tests for parser, validator, backup, persistence, or helper contract changes.
-- Do not add telemetry, analytics, network calls, or new third-party dependencies without a clear product need.
+- Do not add telemetry, analytics, or new third-party dependencies without a clear product need. Network requests must be limited to documented, essential functionality such as update checks, with matching privacy documentation and tests.
 - Mention in the pull request when a change affects `/etc/hosts` writing or the helper.
 
 ## Helper Signing

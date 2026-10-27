@@ -69,4 +69,68 @@ final class hosts_managerUITests: XCTestCase {
             XCUIApplication().launch()
         }
     }
+
+    @MainActor
+    func testUpdateMenuShowsAvailableRelease() throws {
+        let app = launchUpdateTestApp(mode: "available")
+        clickCheckForUpdates(in: app)
+
+        let versionTitle = element("update-version-title", in: app)
+        XCTAssertTrue(versionTitle.waitForExistence(timeout: 6))
+        XCTAssertEqual(versionTitle.label, "Hosts Manager v9.9.9")
+        XCTAssertTrue(app.staticTexts["UI test release notes."].exists)
+    }
+
+    @MainActor
+    func testSettingsCheckReportsUpToDate() throws {
+        let app = launchUpdateTestApp(mode: "upToDate")
+
+        let settingsButton = app.buttons["sidebar-settings-button"]
+        XCTAssertTrue(settingsButton.waitForExistence(timeout: 8))
+        settingsButton.click()
+
+        let checkButton = app.buttons["settings-check-for-updates"]
+        XCTAssertTrue(checkButton.waitForExistence(timeout: 5))
+        checkButton.click()
+
+        XCTAssertTrue(element("update-up-to-date", in: app).waitForExistence(timeout: 6))
+    }
+
+    @MainActor
+    func testUpdateDownloadCompletesWithoutMountingDMG() throws {
+        let app = launchUpdateTestApp(mode: "available")
+        clickCheckForUpdates(in: app)
+
+        let downloadButton = app.buttons["update-download-button"]
+        XCTAssertTrue(downloadButton.waitForExistence(timeout: 6))
+        downloadButton.click()
+
+        XCTAssertTrue(element("update-downloaded", in: app).waitForExistence(timeout: 8))
+        XCTAssertTrue(app.buttons["update-show-in-finder"].exists)
+    }
+
+    @MainActor
+    private func launchUpdateTestApp(mode: String) -> XCUIApplication {
+        let app = XCUIApplication()
+        app.launchArguments += [
+            "-AppleLanguages", "(zh-Hans)",
+            "-AppleLocale", "zh_CN",
+            "-UITestUpdateMode", mode,
+            "-UITestDisableHelperGuide"
+        ]
+        app.launch()
+        return app
+    }
+
+    @MainActor
+    private func clickCheckForUpdates(in app: XCUIApplication) {
+        XCTAssertTrue(app.buttons["create-profile-button"].waitForExistence(timeout: 8))
+        XCTAssertTrue(app.menuBars.menuBarItems["Hosts Manager"].exists)
+        app.typeKey("u", modifierFlags: [.command, .shift])
+    }
+
+    @MainActor
+    private func element(_ identifier: String, in app: XCUIApplication) -> XCUIElement {
+        app.descendants(matching: .any)[identifier]
+    }
 }

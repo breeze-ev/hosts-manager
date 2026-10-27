@@ -214,21 +214,30 @@ nonisolated enum UpdateReleaseMapper {
         guard let version = AppVersion(release.tagName) else {
             throw UpdateFailure(.invalidResponse, detail: release.tagName)
         }
+        guard version.prerelease.isEmpty else {
+            throw UpdateFailure(.unstableRelease)
+        }
 
         let pageURL = httpsURL(release.htmlURL) ?? releaseTagURL(release.tagName)
         let matchingAssets = release.assets
-            .compactMap { asset -> UpdateAsset? in
+            .enumerated()
+            .compactMap { index, asset -> (index: Int, asset: UpdateAsset)? in
                 guard asset.name.lowercased().hasSuffix(".dmg"),
                       asset.name.lowercased().contains(architecture.lowercased()),
                       let url = httpsURL(asset.browserDownloadURL) else {
                     return nil
                 }
-                return UpdateAsset(name: asset.name, url: url, size: asset.size)
+                return (index, UpdateAsset(name: asset.name, url: url, size: asset.size))
             }
             .sorted {
-                ($0.name.lowercased(), $0.url.absoluteString)
-                    < ($1.name.lowercased(), $1.url.absoluteString)
+                let left = ($0.asset.name.lowercased(), $0.asset.url.absoluteString)
+                let right = ($1.asset.name.lowercased(), $1.asset.url.absoluteString)
+                if left != right {
+                    return left < right
+                }
+                return $0.index < $1.index
             }
+            .map(\.asset)
         let downloadAsset = matchingAssets.first
         let checksumName = downloadAsset.map { $0.name + ".sha256" }
         let checksumAsset: UpdateAsset? = release.assets.first(where: { asset in
@@ -393,7 +402,7 @@ nonisolated final class URLSessionUpdateTransport: UpdateTransport {
         var request = URLRequest(url: UpdateReleaseMapper.latestReleaseAPIURL)
         request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
         request.setValue("Hosts-Manager-Update-Check", forHTTPHeaderField: "User-Agent")
-        let (data, response) = try await apiSession.data(for: request)
+        let (data, response) = try await downloadSession.data(for: request)
         guard let httpResponse = response as? HTTPURLResponse else {
             throw UpdateFailure(.network, detail: "Invalid HTTP response")
         }
@@ -506,6 +515,7 @@ final class UpdateCenter: ObservableObject {
     private var activeDownloadID: UUID?
     private var downloadedTemporaryURL: URL?
     private var pendingPresentation = false
+    private var pendingPresentationShouldActivate = false
     private var isManualCheckRequested = false
 
     init(
@@ -671,13 +681,20 @@ final class UpdateCenter: ObservableObject {
     func presentPanel() {
         guard !isPresentationBlocked else { return }
         isPanelPresented = true
+        if currentRelease != nil {
+            hasPresentedCurrentRelease = true
+        }
     }
 
-    private func requestPanelPresentation() {
+    private func requestPanelPresentation(activate: Bool = false) {
         if isPresentationBlocked {
             pendingPresentation = true
+            pendingPresentationShouldActivate = pendingPresentationShouldActivate || activate
         } else {
             presentPanel()
+            if activate {
+                activator()
+            }
         }
     }
 
@@ -689,6 +706,7 @@ final class UpdateCenter: ObservableObject {
         hasPresentedCurrentRelease = false
         isPanelPresented = false
         pendingPresentation = false
+        pendingPresentationShouldActivate = false
     }
 
     func publishPanelDismissal() {
@@ -705,7 +723,8 @@ final class UpdateCenter: ObservableObject {
         pendingPresentation = false
         presentPanel()
         hasPresentedCurrentRelease = true
-        if case .downloaded = phase {
+        if pendingPresentationShouldActivate {
+            pendingPresentationShouldActivate = false
             activator()
         }
     }
@@ -720,9 +739,28 @@ final class UpdateCenter: ObservableObject {
         revealer(fileURL)
     }
 
-    func openDownloadedFile() {
-        guard case .downloaded(_, let fileURL, _, _, _) = phase else { return }
-        _ = opener(fileURL)
+    @discardableResult
+    func retryOpeningDownloadedFile() -> Bool {
+        guard case .downloaded(let release, let fileURL, let checksum, _, _) = phase,
+              let asset = release.downloadAsset else {
+            return false
+        }
+
+        var quarantined = true
+        do {
+            try quarantineWriter(fileURL, asset.url, release.pageURL)
+        } catch {
+            quarantined = false
+        }
+        let opened = quarantined && opener(fileURL)
+        phase = .downloaded(
+            release,
+            fileURL: fileURL,
+            checksum: checksum,
+            opened: opened,
+            quarantined: quarantined
+        )
+        return opened
     }
 
     private func performCheck(manual: Bool) async -> Bool {
@@ -759,11 +797,14 @@ final class UpdateCenter: ObservableObject {
                 isManualCheckRequested = false
                 if isPresentationBlocked {
                     pendingPresentation = true
+                    pendingPresentationShouldActivate = !shouldPresent
                 } else {
                     presentPanel()
                     hasPresentedCurrentRelease = true
                     pendingPresentation = false
-                    activator()
+                    if !shouldPresent {
+                        activator()
+                    }
                 }
                 persistCheckResult(succeeded: true)
                 return shouldPresent || !isPresentationBlocked
@@ -839,10 +880,15 @@ final class UpdateCenter: ObservableObject {
             )
             try Task.checkCancellation()
 
-            let destination = try UpdateFileNaming.uniqueDestination(
-                directory: downloadsDirectory,
-                fileName: asset.name
-            )
+            let destination: URL
+            do {
+                destination = try UpdateFileNaming.uniqueDestination(
+                    directory: downloadsDirectory,
+                    fileName: asset.name
+                )
+            } catch {
+                throw UpdateFailure(.fileMove, detail: error.localizedDescription)
+            }
             do {
                 try FileManager.default.moveItem(at: downloadedURL, to: destination)
             } catch {
@@ -951,7 +997,6 @@ final class UpdateCenter: ObservableObject {
 
 }
 
-#if DEBUG
 extension UpdateCenter {
     static func forCurrentProcess() -> UpdateCenter {
         let arguments = ProcessInfo.processInfo.arguments
@@ -968,7 +1013,7 @@ extension UpdateCenter {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent("hosts-manager-ui-updates-\(UUID().uuidString)", isDirectory: true)
         return UpdateCenter(
-            currentVersionString: "0.1.0-beta",
+            currentVersionString: "0.1.0",
             currentBuildNumber: "6",
             transport: transport,
             defaults: UserDefaults(suiteName: "hosts-manager-ui-tests-\(UUID().uuidString)")!,
@@ -993,7 +1038,7 @@ private final class UITestUpdateTransport: UpdateTransport {
         if mode == "failure" {
             throw UpdateFailure(.network, detail: "UI test network failure")
         }
-        let version = mode == "upToDate" ? "v0.1.0-beta" : "v9.9.9"
+        let version = mode == "upToDate" ? "v0.1.0" : "v9.9.9"
         return GitHubRelease(
             tagName: version,
             name: "Hosts Manager \(version)",
@@ -1032,7 +1077,6 @@ private final class UITestUpdateTransport: UpdateTransport {
         return fileURL
     }
 }
-#endif
 
 struct UpdateSheet: View {
     @ObservedObject var updateCenter: UpdateCenter
@@ -1346,6 +1390,14 @@ struct UpdateSheet: View {
                 }
                 .buttonStyle(.glass)
                 .accessibilityIdentifier("update-show-in-finder")
+                if case .downloaded(_, _, _, let opened, let quarantined) = updateCenter.phase,
+                   !opened || !quarantined {
+                    Button(l10n.s("重试打开", "Retry Open")) {
+                        updateCenter.retryOpeningDownloadedFile()
+                    }
+                    .buttonStyle(.glass)
+                    .accessibilityIdentifier("update-retry-open")
+                }
             }
 
             if updateCenter.currentRelease != nil {
@@ -1382,7 +1434,7 @@ struct UpdateSheet: View {
                 .buttonStyle(.borderedProminent)
             case .failed:
                 Button(l10n.s("打开发布页", "Open Release Page")) {
-                    NSWorkspace.shared.open(UpdateReleaseMapper.releasesPageURL)
+                    updateCenter.openReleasePage()
                 }
                 .buttonStyle(.glass)
                 .accessibilityIdentifier("update-open-release-page")

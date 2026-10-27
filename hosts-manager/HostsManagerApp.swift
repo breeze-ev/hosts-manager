@@ -60,6 +60,8 @@ struct HostsManagerApp: App {
                 Button(isEnglish ? "Check for Updates…" : "检查更新…") {
                     Task { await updateCenter.checkForUpdates(manual: true) }
                 }
+                .keyboardShortcut("u", modifiers: [.command, .shift])
+                .accessibilityIdentifier("check-for-updates-menu-item")
             }
             CommandGroup(after: .saveItem) {
                 Button(isEnglish ? "Apply Profile" : "应用配置") {

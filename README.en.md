@@ -29,8 +29,9 @@ Hosts Manager manages the domain-to-IP mappings in `/etc/hosts`, serving two mai
 - Real-time apply when enabled profiles change
 - Automatic timestamped backups with restore
 - Optional silent writes through a privileged LaunchDaemon helper
+- Daily stable-release update checks, with architecture-matched DMG download, verification, and opening
 - Chinese and English interface
-- No telemetry, no network access, no third-party analytics
+- No telemetry or third-party analytics; GitHub Releases is contacted only for update checks
 
 ## Requirements
 

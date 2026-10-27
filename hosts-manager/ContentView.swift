@@ -367,6 +367,15 @@ struct ContentView: View {
         return profiles.first(where: { !$0.isSystem }) ?? profiles.first
     }
 
+    private var shouldShowHelperGuideOnLaunch: Bool {
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("-UITestDisableHelperGuide") {
+            return false
+        }
+        #endif
+        return !HostsHelperClient.isRegistered
+    }
+
     var body: some View {
         NavigationSplitView {
             sidebar
@@ -440,7 +449,7 @@ struct ContentView: View {
             if selectedProfileID == nil {
                 selectedProfileID = initialProfileID()
             }
-            if !HostsHelperClient.isRegistered {
+            if shouldShowHelperGuideOnLaunch {
                 showHelperGuide = true
             }
             applyAppearance()
@@ -621,6 +630,8 @@ struct ContentView: View {
                     }
                     .buttonStyle(.borderless)
                     .help(l10n.s("设置", "Settings"))
+                    .accessibilityLabel(l10n.s("设置", "Settings"))
+                    .accessibilityIdentifier("sidebar-settings-button")
                 }
                 .padding(.vertical, 8)
                 .padding(.horizontal, 12)
@@ -3761,7 +3772,8 @@ struct SettingsView: View {
             case .downloading(_, let progress):
                 ProgressView(value: progress)
                     .progressViewStyle(.linear)
-            case .downloaded(_, let fileURL, let checksum, _, _):
+                    .accessibilityIdentifier("settings-update-progress")
+            case .downloaded(_, _, let checksum, _, _):
                 Label(
                     checksum == .verified
                         ? l10n.s("SHA-256 校验通过", "SHA-256 verified")
@@ -3771,29 +3783,36 @@ struct SettingsView: View {
                 .font(.system(size: 11.5))
                 .foregroundStyle(.secondary)
                 Button(l10n.s("显示已下载的安装包", "Show Downloaded Installer")) {
-                    NSWorkspace.shared.activateFileViewerSelecting([fileURL])
+                    updateCenter.revealDownloadedFile()
                 }
                 .buttonStyle(.link)
                 .font(.system(size: 12))
             default:
-                if let lastCheckDate = updateCenter.lastCheckDate {
-                    Text(l10n.s(
-                        "上次检查：\(lastCheckDate.formatted(date: .abbreviated, time: .shortened))",
-                        "Last checked: \(lastCheckDate.formatted(date: .abbreviated, time: .shortened))"
-                    ))
-                    .font(.system(size: 12))
-                    .foregroundStyle(.secondary)
-                }
+                EmptyView()
+            }
+
+            if let lastCheckDate = updateCenter.lastCheckDate {
+                Text(l10n.s(
+                    "上次检查：\(lastCheckDate.formatted(date: .abbreviated, time: .shortened))",
+                    "Last checked: \(lastCheckDate.formatted(date: .abbreviated, time: .shortened))"
+                ))
+                .font(.system(size: 12))
+                .foregroundStyle(.secondary)
             }
         }
         .padding(12)
         .background(RoundedRectangle(cornerRadius: 12).fill(.quaternary.opacity(0.12)))
         .overlay(RoundedRectangle(cornerRadius: 12).stroke(.quaternary.opacity(0.4)))
+        .accessibilityIdentifier("software-update-card")
     }
 
     @ViewBuilder
     private var updateStatusText: some View {
         switch updateCenter.phase {
+        case .checking:
+            Text(l10n.s("正在检查更新…", "Checking for updates…"))
+                .font(.system(size: 12))
+                .foregroundStyle(.secondary)
         case .downloading(_, let progress):
             Text(l10n.s(
                 "正在下载：\(Int(progress * 100))%",
@@ -3822,17 +3841,14 @@ struct SettingsView: View {
             ))
             .font(.system(size: 12))
             .foregroundStyle(.orange)
+        case .upToDate:
+            Text(l10n.s("已是最新版本。", "You’re up to date."))
+                .font(.system(size: 12))
+                .foregroundStyle(.secondary)
         case .downloaded:
             EmptyView()
         default:
-            if let lastCheckDate = updateCenter.lastCheckDate {
-                Text(l10n.s(
-                    "上次检查：\(lastCheckDate.formatted(date: .abbreviated, time: .shortened))",
-                    "Last checked: \(lastCheckDate.formatted(date: .abbreviated, time: .shortened))"
-                ))
-                .font(.system(size: 12))
-                .foregroundStyle(.secondary)
-            }
+            EmptyView()
         }
     }
 
