@@ -1185,7 +1185,14 @@ struct UpdateSheet: View {
     }
 
     private var header: some View {
-        HStack(spacing: 14) {
+        HStack(alignment: .top, spacing: 14) {
+            TrafficLightCloseButton {
+                updateCenter.publishPanelDismissal()
+            }
+            .accessibilityIdentifier("update-close-button")
+            .accessibilityLabel(l10n.s("稍后", "Later"))
+            .padding(.top, 4)
+
             Image(systemName: "arrow.down.circle.dotted")
                 .font(.system(size: 28, weight: .medium))
                 .foregroundStyle(Color.accentColor)
@@ -1202,11 +1209,6 @@ struct UpdateSheet: View {
                 .foregroundStyle(.secondary)
             }
             Spacer()
-            TrafficLightCloseButton {
-                updateCenter.publishPanelDismissal()
-            }
-            .accessibilityIdentifier("update-close-button")
-            .accessibilityLabel(l10n.s("稍后", "Later"))
         }
         .padding(.horizontal, 24)
         .padding(.vertical, 18)
