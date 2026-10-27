@@ -2,6 +2,35 @@
 
 [中文](CHANGELOG.md)
 
+## 1.0.0 - 2026-10-27
+
+First stable release.
+
+### Added
+
+- In-app update center: check GitHub stable releases from the menu (`Check for Updates…`, ⇧⌘U) or Settings, with automatic checks at most once per day. Downloads the DMG for Apple Silicon / Intel, shows progress, supports cancellation, verifies SHA-256 when available, reveals the installer in Finder, and opens it after applying quarantine metadata. The releases page remains available as a fallback.
+- Import hosts profiles from files: accepts `.hosts` or plain text, imports user entries as an unapplied profile, enforces a 1 MiB limit, and reports invalid encodings, invalid content, and files without importable user entries.
+- `/etc/hosts` reconciliation protection: compares the system file with the applied profile selection on launch and before writes. External edits or failed state commits block further overwrites and offer “Keep System File” or “Reapply Profiles”.
+- Source draft management: preserves unapplied drafts, detects conflicts between list and source edits, supports “Discard”, and avoids rewriting a profile when the draft is equivalent to its saved content.
+
+### Improved
+
+- `/etc/hosts` writes now run serially through their commits, preventing rapid profile toggles, real-time applies, and backup restores from failing because of concurrent writes.
+- Backup maintenance synchronizes records before pruning files and preserves backups referenced by records; backup deletion and restore state roll back when saving fails.
+- Restoring a backup to `/etc/hosts` disables all user profiles so later edits cannot overwrite the restored content.
+- Exact duplicate entries are merged when enabling profile combinations. The apply flow can remove exact duplicates across applied profiles, while hostname conflicts still block writes.
+- Settings now include a software update status card. Profile, backup, and error controls have clearer copy and accessibility labels.
+
+### Fixed
+
+- Corrected profile switches falling out of sync with the actual `/etc/hosts` state. New, imported, and duplicated profiles now default to unapplied.
+- Fixed repeated write failures after external edits and lost follow-up real-time applies.
+- Fixed application state being rolled back or overwritten after a file write succeeded but its Core Data commit failed.
+
+### Release
+
+- Separate arm64 (Apple Silicon) and x86_64 (Intel) DMGs with sha256 checksums.
+
 ## 0.1.0-beta (6) - 2026-10-26
 
 First public beta release.

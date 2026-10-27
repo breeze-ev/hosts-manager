@@ -53,6 +53,19 @@ struct UpdateVersionTests {
 }
 
 struct UpdateReleaseMapperTests {
+    @Test func choosesArchitectureCaseInsensitively() throws {
+        let release = makeGitHubRelease(assets: [
+            asset("Hosts-Manager-1.2.0-ARM64.DMG")
+        ])
+
+        let mapped = try UpdateReleaseMapper.map(
+            release,
+            architecture: UpdateCenter.currentArchitecture
+        )
+
+        #expect(mapped.downloadAsset?.name == "Hosts-Manager-1.2.0-ARM64.DMG")
+    }
+
     @Test func mapsStableReleaseAndArchitectureAssets() throws {
         let release = makeGitHubRelease(
             tag: "v1.2.0",
@@ -566,6 +579,29 @@ struct UpdateCenterStateTests {
         await center.checkAutomaticallyIfDue()
         #expect(await transport.releaseFetchCount == 2)
     }
+
+    @Test func manualRetryAfterFailedCheckCanFindUpdate() async throws {
+        let defaults = try makeDefaults()
+        defer { removeDefaults(defaults) }
+        let transport = RateLimitedUpdateTransport(
+            release: makeAvailableGitHubRelease()
+        )
+        let center = makeCenter(transport: transport, defaults: defaults.defaults)
+
+        await center.checkForUpdates(manual: true)
+        if case .failed = center.phase {} else {
+            Issue.record("Expected first manual check to fail")
+        }
+
+        let succeeded = await center.checkForUpdates(manual: true)
+        #expect(succeeded)
+        #expect(await transport.releaseFetchCount == 2)
+        if case .available(let release) = center.phase {
+            #expect(release.version.displayString == "1.2.0")
+        } else {
+            Issue.record("Expected retry to find an available release")
+        }
+    }
 }
 
 private let updateAssetName = "Hosts-Manager-1.2.0-arm64.dmg"
@@ -653,7 +689,7 @@ private func removeDefaults(_ value: (defaults: UserDefaults, suiteName: String)
 
 @MainActor
 private func makeCenter(
-    transport: StubUpdateTransport,
+    transport: UpdateTransport,
     defaults: UserDefaults,
     version: String? = "0.1.0",
     downloadsDirectory: URL? = nil,
@@ -776,6 +812,48 @@ private final class TestClock {
 @MainActor
 private final class Counter {
     var value = 0
+
+    func increment() {
+        value += 1
+    }
+}
+
+private final class RateLimitedUpdateTransport: UpdateTransport, @unchecked Sendable {
+    private let release: GitHubRelease
+    private var firstFetchCount: Int
+    private var secondFetchCount: Int
+
+    init(release: GitHubRelease) {
+        self.release = release
+        firstFetchCount = 0
+        secondFetchCount = 0
+    }
+
+    var releaseFetchCount: Int {
+        get async {
+            firstFetchCount + secondFetchCount
+        }
+    }
+
+    nonisolated func fetchLatestRelease() async throws -> GitHubRelease? {
+        if firstFetchCount == 0 {
+            firstFetchCount += 1
+            throw UpdateFailure(.network, detail: "HTTP 403")
+        }
+        secondFetchCount += 1
+        return release
+    }
+
+    nonisolated func fetchData(from url: URL) async throws -> Data {
+        throw URLError(.fileDoesNotExist)
+    }
+
+    nonisolated func download(
+        from url: URL,
+        progress: @escaping @Sendable (Double) -> Void
+    ) async throws -> URL {
+        throw URLError(.fileDoesNotExist)
+    }
 }
 
 @MainActor

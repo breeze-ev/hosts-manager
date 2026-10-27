@@ -376,8 +376,8 @@ nonisolated enum UpdateFileNaming {
 }
 
 nonisolated final class URLSessionUpdateTransport: UpdateTransport {
-    private let apiSession: URLSession
-    private let downloadSession: URLSession
+    nonisolated private let apiSession: URLSession
+    nonisolated private let downloadSession: URLSession
 
     init() {
         let apiConfiguration = URLSessionConfiguration.ephemeral
@@ -402,10 +402,52 @@ nonisolated final class URLSessionUpdateTransport: UpdateTransport {
         var request = URLRequest(url: UpdateReleaseMapper.latestReleaseAPIURL)
         request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
         request.setValue("Hosts-Manager-Update-Check", forHTTPHeaderField: "User-Agent")
-        let (data, response) = try await downloadSession.data(for: request)
+        let (firstData, firstResponse) = try await Self.releaseResponse(
+            from: request,
+            session: downloadSession
+        )
+        if firstResponse.statusCode == 403,
+           let retryAfter = Self.retryAfterInterval(from: firstResponse) {
+            try? await Task.sleep(for: .seconds(retryAfter))
+            return try await Self.releasePayload(from: request, session: downloadSession)
+        }
+        return try Self.releasePayload(from: firstData, response: firstResponse)
+    }
+
+    func fetchData(from url: URL) async throws -> Data {
+        var request = URLRequest(url: url)
+        request.setValue("Hosts-Manager-Update-Check", forHTTPHeaderField: "User-Agent")
+        let (data, response) = try await apiSession.data(for: request)
+        guard let httpResponse = response as? HTTPURLResponse,
+              httpResponse.statusCode == 200 else {
+            throw UpdateFailure(.network, detail: "Unable to fetch checksum")
+        }
+        return data
+    }
+
+    nonisolated private static func releaseResponse(
+        from request: URLRequest,
+        session: URLSession
+    ) async throws -> (Data, HTTPURLResponse) {
+        let (data, response) = try await session.data(for: request)
         guard let httpResponse = response as? HTTPURLResponse else {
             throw UpdateFailure(.network, detail: "Invalid HTTP response")
         }
+        return (data, httpResponse)
+    }
+
+    nonisolated private static func releasePayload(
+        from request: URLRequest,
+        session: URLSession
+    ) async throws -> GitHubRelease? {
+        let (data, httpResponse) = try await releaseResponse(from: request, session: session)
+        return try releasePayload(from: data, response: httpResponse)
+    }
+
+    nonisolated private static func releasePayload(
+        from data: Data,
+        response httpResponse: HTTPURLResponse
+    ) throws -> GitHubRelease? {
         if httpResponse.statusCode == 404 {
             return nil
         }
@@ -419,15 +461,15 @@ nonisolated final class URLSessionUpdateTransport: UpdateTransport {
         }
     }
 
-    func fetchData(from url: URL) async throws -> Data {
-        var request = URLRequest(url: url)
-        request.setValue("Hosts-Manager-Update-Check", forHTTPHeaderField: "User-Agent")
-        let (data, response) = try await apiSession.data(for: request)
-        guard let httpResponse = response as? HTTPURLResponse,
-              httpResponse.statusCode == 200 else {
-            throw UpdateFailure(.network, detail: "Unable to fetch checksum")
+    nonisolated private static func retryAfterInterval(
+        from response: HTTPURLResponse
+    ) -> TimeInterval? {
+        guard let retryAfterHeader = response.value(forHTTPHeaderField: "Retry-After"),
+              let retryAfter = TimeInterval(retryAfterHeader),
+              retryAfter > 0 else {
+            return nil
         }
-        return data
+        return min(retryAfter, 2)
     }
 
     func download(
@@ -987,7 +1029,7 @@ final class UpdateCenter: ObservableObject {
                 .appendingPathComponent("Downloads", isDirectory: true)
     }
 
-    private static var currentArchitecture: String {
+    nonisolated static var currentArchitecture: String {
         #if arch(arm64)
         return "arm64"
         #else
