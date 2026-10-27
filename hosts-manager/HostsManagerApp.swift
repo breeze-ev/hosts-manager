@@ -29,6 +29,7 @@ struct HostsManagerApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     @StateObject private var persistenceController = PersistenceController.shared
     @StateObject private var l10n = Localization()
+    @StateObject private var updateCenter = UpdateCenter.forCurrentProcess()
     @AppStorage("language") private var language = "system"
 
     private var isEnglish: Bool {
@@ -46,9 +47,20 @@ struct HostsManagerApp: App {
                 }
             }
             .environmentObject(l10n)
+            .environmentObject(updateCenter)
+            .task {
+                try? await Task.sleep(for: .seconds(3))
+                guard !Task.isCancelled else { return }
+                await updateCenter.checkAutomaticallyIfDue()
+            }
         }
         .windowToolbarStyle(.unified)
         .commands {
+            CommandGroup(after: .appInfo) {
+                Button(isEnglish ? "Check for Updates…" : "检查更新…") {
+                    Task { await updateCenter.checkForUpdates(manual: true) }
+                }
+            }
             CommandGroup(after: .saveItem) {
                 Button(isEnglish ? "Apply Profile" : "应用配置") {
                     NotificationCenter.default.post(name: .performApply, object: nil)

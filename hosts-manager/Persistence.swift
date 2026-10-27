@@ -14,6 +14,7 @@ final class PersistenceController: ObservableObject {
 
     var container: NSPersistentContainer
     @Published private(set) var loadError: String?
+    private var seededDefaultProfileID: UUID?
 
     init(inMemory: Bool = false) {
         container = NSPersistentContainer(name: "hosts_manager", managedObjectModel: Self.model)
@@ -115,6 +116,7 @@ final class PersistenceController: ObservableObject {
             profile.lastActivatedAt = Date()
             profile.createdAt = Date()
             profile.updatedAt = Date()
+            seededDefaultProfileID = profile.id
         }
 
         if try context.count(for: AppSettings.fetchRequest()) == 0 {
@@ -122,6 +124,7 @@ final class PersistenceController: ObservableObject {
             settings.id = UUID()
             settings.backupRetention = 30
             settings.defaultView = "list"
+            settings.defaultProfileID = seededDefaultProfileID
         } else if let settings = try context.fetch(AppSettings.fetchRequest()).first {
             if settings.defaultView == nil {
                 settings.defaultView = "list"
@@ -180,6 +183,7 @@ final class PersistenceController: ObservableObject {
         profile.lastActivatedAt = Date()
         profile.createdAt = Date()
         profile.updatedAt = Date()
+        seededDefaultProfileID = profile.id
 
         // Import the real non-system entries from /etc/hosts into the first custom profile.
         let userEntries = HostsParser.parse(HostsWriter.currentContent()).filter { !$0.isSystem }
@@ -198,6 +202,7 @@ final class PersistenceController: ObservableObject {
         settings.id = UUID()
         settings.backupRetention = 30
         settings.defaultView = "list"
+        settings.defaultProfileID = seededDefaultProfileID
 
         try context.save()
     }

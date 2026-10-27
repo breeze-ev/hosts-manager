@@ -162,7 +162,17 @@ extension Profile {
         if isSystem {
             return localizedProfileName("系统", isEnglish: isEnglish)
         }
-        return localizedProfileName(name, isEnglish: isEnglish)
+        // Localized aliases are only for the seeded default profile. A
+        // user-named profile containing the same words must keep what the
+        // user typed, so identify the seed by its persisted profile ID.
+        if let profileID = id,
+           ["默认", "Default"].contains(name),
+           let context = managedObjectContext,
+           let settings = try? context.fetch(AppSettings.fetchRequest()).first,
+           settings.defaultProfileID == profileID {
+            return localizedProfileName(name, isEnglish: isEnglish)
+        }
+        return name ?? ""
     }
 }
 

@@ -287,6 +287,29 @@ struct ProfileSidebarRow: View {
     }
 }
 
+private struct OperationErrorAlert: ViewModifier {
+    let title: String
+    @Binding var error: String?
+
+    func body(content: Content) -> some View {
+        content.alert(
+            title,
+            isPresented: Binding(
+                get: { error != nil },
+                set: { isPresented in
+                    if !isPresented {
+                        error = nil
+                    }
+                }
+            )
+        ) {
+            Button("OK") { error = nil }
+        } message: {
+            Text(error ?? "")
+        }
+    }
+}
+
 struct ContentView: View {
     @Environment(\.managedObjectContext) private var context
     @FetchRequest(sortDescriptors: [
@@ -295,6 +318,7 @@ struct ContentView: View {
     ], animation: .default)
     private var profiles: FetchedResults<Profile>
     @EnvironmentObject private var l10n: Localization
+    @EnvironmentObject private var updateCenter: UpdateCenter
     @AppStorage("appearance") private var appearance = "system"
 
     @State private var selection: SidebarItem = .profiles
@@ -303,6 +327,7 @@ struct ContentView: View {
     @State private var didApplyDefaultMode = false
     @State private var showApply = false
     @State private var applyDraftText: String?
+    @State private var isUpdatePanelPresented = false
     @State private var query = ""
     @State private var sourceDrafts: [UUID: String] = [:]
     /// 源码草稿与列表内容发生冲突的配置：草稿不会被静默丢弃，而是标记出来让用户决定。
@@ -362,20 +387,30 @@ struct ContentView: View {
                 )
             }
         }
+        .sheet(isPresented: $isUpdatePanelPresented, onDismiss: {
+            updateCenter.panelDidDismiss()
+        }) {
+            UpdateSheet(updateCenter: updateCenter)
+        }
+        .onChange(of: updateCenter.isPanelPresented) { _, isPresented in
+            isUpdatePanelPresented = isPresented
+        }
+        .onAppear {
+            isUpdatePanelPresented = updateCenter.isPanelPresented
+        }
         .sheet(isPresented: $showHelperGuide) {
             HelperGuideSheet(onClose: { showHelperGuide = false })
         }
-        .alert(
-            l10n.s("操作失败", "Operation Failed"),
-            isPresented: Binding(
-                get: { operationError != nil },
-                set: { if !$0 { operationError = nil } }
-            )
-        ) {
-            Button("OK") { operationError = nil }
-        } message: {
-            Text(operationError ?? "")
+        .onChange(of: showApply || showHelperGuide) { _, isBlocked in
+            updateCenter.setPresentationBlocked(isBlocked)
         }
+        .onAppear {
+            updateCenter.setPresentationBlocked(showApply || showHelperGuide)
+        }
+        .modifier(OperationErrorAlert(
+            title: l10n.s("操作失败", "Operation Failed"),
+            error: $operationError
+        ))
         .alert(
             l10n.s("/etc/hosts 状态需要确认", "/etc/hosts Needs Reconciliation"),
             isPresented: $showExternalHostsWarning
@@ -1301,6 +1336,13 @@ struct ContentView: View {
     /// Explicit user choice: overwrite the externally edited file with the
     /// current applied-profile merge.
     private func reapplyActiveProfiles() {
+        // The alert is an explicit overwrite choice. Snapshot the live file now
+        // so queued writes still reject an edit that happens after the choice.
+        // A stale/missing cached baseline must not turn this choice into an
+        // unguarded overwrite or a repeated reconciliation alert.
+        let expectedFingerprint = (try? HostsWriter.readContent()).map(
+            HostsReconciliation.canonical
+        )
         let targetIDs = stateCommitFailed && hasPendingAppliedProfileSelection
             ? pendingAppliedProfileIDs
             : activeProfiles.compactMap(\.id)
@@ -1323,6 +1365,12 @@ struct ContentView: View {
             return
         }
         showExternalHostsWarning = false
+        // Reapply is the explicit unblock action. Without this, a coordinator
+        // left blocked by an external edit rejects the very write that is
+        // meant to resolve the alert, so the same warning reappears.
+        if let liveContent = try? HostsWriter.readContent() {
+            writeCoordinator.reconcile(currentContent: liveContent)
+        }
         if targetIDs.isEmpty {
             writeEmptyAppliedSelection()
             return
@@ -1341,7 +1389,7 @@ struct ContentView: View {
                     appliedProfileIDs = targets.compactMap(\.id)
                     return HostsWriteRequest(
                         content: self.mergedContent(for: targets),
-                        expectedCurrentFingerprint: self.lastKnownHostsFingerprint,
+                        expectedCurrentFingerprint: expectedFingerprint,
                         appliedProfileIDs: targets.compactMap(\.id)
                     )
                 }, commit: { result in
@@ -1378,7 +1426,9 @@ struct ContentView: View {
     }
 
     private func writeEmptyAppliedSelection() {
-        let expectedFingerprint = lastKnownHostsFingerprint
+        let expectedFingerprint = (try? HostsWriter.readContent()).map(
+            HostsReconciliation.canonical
+        )
         Task {
             do {
                 var appliedProfileIDs: [UUID] = []
@@ -3524,6 +3574,7 @@ struct HelperGuideSheet: View {
 struct SettingsView: View {
     @FetchRequest private var settings: FetchedResults<AppSettings>
     @EnvironmentObject private var l10n: Localization
+    @EnvironmentObject private var updateCenter: UpdateCenter
     @AppStorage("appearance") private var appearance = "system"
     @State private var retention = 30
     @State private var defaultView = EntryMode.list.rawValue
@@ -3578,6 +3629,9 @@ struct SettingsView: View {
             .background(RoundedRectangle(cornerRadius: 14).fill(.quaternary.opacity(0.14)))
             .overlay(RoundedRectangle(cornerRadius: 14).stroke(.quaternary.opacity(0.4)))
             .clipShape(RoundedRectangle(cornerRadius: 14))
+
+            updateSection
+                .padding(.top, 16)
 
             HStack(alignment: .top, spacing: 10) {
                 Image(systemName: "shield.lefthalf.filled")
@@ -3665,6 +3719,121 @@ struct SettingsView: View {
 
     private func refreshHelperStatus() {
         helperStatus = HostsHelperClient.statusLabel(isEnglish: l10n.isEnglish)
+    }
+
+    private var updateSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .top, spacing: 10) {
+                Image(systemName: "arrow.down.circle")
+                    .foregroundStyle(Color.accentColor)
+                    .padding(.top, 1)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(l10n.s("软件更新", "Software Update"))
+                        .font(.system(size: 13, weight: .semibold))
+                    Text(l10n.s(
+                        "当前版本 \(updateCenter.displayedVersion)（\(updateCenter.currentBuildNumber)）",
+                        "Current version \(updateCenter.displayedVersion) (\(updateCenter.currentBuildNumber))"
+                    ))
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+                    updateStatusText
+                }
+                Spacer()
+                Button {
+                    Task { await updateCenter.checkForUpdates(manual: true) }
+                } label: {
+                    if updateCenter.isChecking {
+                        HStack(spacing: 7) {
+                            ProgressView()
+                                .controlSize(.small)
+                            Text(l10n.s("检查中…", "Checking…"))
+                        }
+                    } else {
+                        Text(l10n.s("检查更新…", "Check for Updates…"))
+                    }
+                }
+                .buttonStyle(.glass)
+                .disabled(updateCenter.isChecking)
+                .accessibilityIdentifier("settings-check-for-updates")
+            }
+
+            switch updateCenter.phase {
+            case .downloading(_, let progress):
+                ProgressView(value: progress)
+                    .progressViewStyle(.linear)
+            case .downloaded(_, let fileURL, let checksum, _, _):
+                Label(
+                    checksum == .verified
+                        ? l10n.s("SHA-256 校验通过", "SHA-256 verified")
+                        : l10n.s("校验文件缺失，交由 Gatekeeper 检查", "Checksum unavailable; Gatekeeper will inspect it"),
+                    systemImage: "checkmark.shield"
+                )
+                .font(.system(size: 11.5))
+                .foregroundStyle(.secondary)
+                Button(l10n.s("显示已下载的安装包", "Show Downloaded Installer")) {
+                    NSWorkspace.shared.activateFileViewerSelecting([fileURL])
+                }
+                .buttonStyle(.link)
+                .font(.system(size: 12))
+            default:
+                if let lastCheckDate = updateCenter.lastCheckDate {
+                    Text(l10n.s(
+                        "上次检查：\(lastCheckDate.formatted(date: .abbreviated, time: .shortened))",
+                        "Last checked: \(lastCheckDate.formatted(date: .abbreviated, time: .shortened))"
+                    ))
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+                }
+            }
+        }
+        .padding(12)
+        .background(RoundedRectangle(cornerRadius: 12).fill(.quaternary.opacity(0.12)))
+        .overlay(RoundedRectangle(cornerRadius: 12).stroke(.quaternary.opacity(0.4)))
+    }
+
+    @ViewBuilder
+    private var updateStatusText: some View {
+        switch updateCenter.phase {
+        case .downloading(_, let progress):
+            Text(l10n.s(
+                "正在下载：\(Int(progress * 100))%",
+                "Downloading: \(Int(progress * 100))%"
+            ))
+            .font(.system(size: 12))
+            .foregroundStyle(.secondary)
+        case .downloadFailed:
+            Text(l10n.s(
+                "下载失败，可重试或打开发布页。",
+                "Download failed. Retry or open the release page."
+            ))
+            .font(.system(size: 12))
+            .foregroundStyle(.orange)
+        case .available(let release):
+            Text(l10n.s(
+                "发现新版本 \(release.version.displayString)。",
+                "Version \(release.version.displayString) is available."
+            ))
+            .font(.system(size: 12))
+            .foregroundStyle(Color.accentColor)
+        case .failed:
+            Text(l10n.s(
+                "上次检查失败。可重试或打开发布页。",
+                "The last check failed. Retry or open the release page."
+            ))
+            .font(.system(size: 12))
+            .foregroundStyle(.orange)
+        case .downloaded:
+            EmptyView()
+        default:
+            if let lastCheckDate = updateCenter.lastCheckDate {
+                Text(l10n.s(
+                    "上次检查：\(lastCheckDate.formatted(date: .abbreviated, time: .shortened))",
+                    "Last checked: \(lastCheckDate.formatted(date: .abbreviated, time: .shortened))"
+                ))
+                .font(.system(size: 12))
+                .foregroundStyle(.secondary)
+            }
+        }
     }
 
     private func installMessageView(_ message: String) -> some View {

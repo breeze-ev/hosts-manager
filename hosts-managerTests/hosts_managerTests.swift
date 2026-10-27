@@ -388,6 +388,29 @@ struct ProfileAppliedStateTests {
         #expect(profiles.allSatisfy { !$0.isAppliedForSystem })
     }
 
+    @Test func localizedNamePreservesOnlySeededDefaultProfile() throws {
+        // Users may intentionally name ordinary profiles “System”, “Default”,
+        // or “New Profile”; only the seeded profiles are reserved.
+        let controller = PersistenceController(inMemory: true)
+        let context = controller.container.viewContext
+        let profiles = try context.fetch(Profile.fetchRequest())
+        guard let seededDefault = profiles.first(where: { !$0.isSystem }) else {
+            Issue.record("Expected the seeded custom profile")
+            return
+        }
+
+        #expect(seededDefault.localizedName(isEnglish: true) == "Default")
+        #expect(seededDefault.localizedName(isEnglish: false) == "默认")
+
+        let userNamed = Profile(context: context)
+        userNamed.id = UUID()
+        for name in ["System", "Default", "New Profile", "导入 Imported"] {
+            userNamed.name = name
+            #expect(userNamed.localizedName(isEnglish: true) == name)
+            #expect(userNamed.localizedName(isEnglish: false) == name)
+        }
+    }
+
     private func makeProfile(in context: NSManagedObjectContext) -> Profile? {
         let profile = Profile(context: context)
         profile.id = UUID()
