@@ -104,6 +104,26 @@ private extension View {
     }
 }
 
+private struct MainWindowBackground: View {
+    @Environment(\.colorScheme) private var colorScheme
+
+    var body: some View {
+        LinearGradient(
+            colors: colorScheme == .dark
+                ? [
+                    Color(red: 0.07, green: 0.10, blue: 0.15),
+                    Color(red: 0.04, green: 0.055, blue: 0.08)
+                ]
+                : [
+                    Color(red: 0.91, green: 0.96, blue: 1.0),
+                    Color(red: 0.985, green: 0.993, blue: 1.0)
+                ],
+            startPoint: .topLeading,
+            endPoint: .bottomTrailing
+        )
+    }
+}
+
 private struct RowIconButton: View {
     let systemName: String
     let help: String
@@ -382,6 +402,9 @@ struct ContentView: View {
                 .navigationSplitViewColumnWidth(min: 244, ideal: 276)
         } detail: {
             detail
+        }
+        .containerBackground(for: .window) {
+            MainWindowBackground()
         }
         .navigationTitle("Hosts Manager")
         .toolbar { toolbarContent }
