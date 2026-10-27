@@ -378,10 +378,6 @@ nonisolated enum UpdateFileNaming {
     }
 }
 
-extension Notification.Name {
-    static let closeUpdateWindow = Notification.Name("UpdateCenterCloseWindow")
-}
-
 nonisolated enum ReleaseNotesFormatter {
     static func attributedString(
         from markdown: String,
@@ -772,7 +768,6 @@ final class UpdateCenter: ObservableObject {
 
     func publishPanelDismissal() {
         panelDidDismiss()
-        NotificationCenter.default.post(name: .closeUpdateWindow, object: nil)
     }
 
     func setPresentationBlocked(_ blocked: Bool, autoPresentOnUnblock: Bool = true) {
