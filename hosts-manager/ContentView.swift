@@ -105,19 +105,13 @@ private extension View {
 }
 
 private struct MainWindowBackground: View {
-    @Environment(\.colorScheme) private var colorScheme
-
     var body: some View {
         LinearGradient(
-            colors: colorScheme == .dark
-                ? [
-                    Color(red: 0.07, green: 0.10, blue: 0.15),
-                    Color(red: 0.04, green: 0.055, blue: 0.08)
-                ]
-                : [
-                    Color(red: 0.91, green: 0.96, blue: 1.0),
-                    Color(red: 0.985, green: 0.993, blue: 1.0)
-                ],
+            colors: [
+                Color.accentColor.opacity(0.10),
+                Color.clear,
+                Color.primary.opacity(0.025)
+            ],
             startPoint: .topLeading,
             endPoint: .bottomTrailing
         )
