@@ -72,6 +72,29 @@ struct HostsParserTests {
         #expect(HostsParser.dedupe(entries).count == 1)
     }
 
+    @Test func entriesEquivalentIncludesOrderFieldsAndDisabledState() {
+        let base = [
+            ParsedHostEntry(ip: "10.0.0.1", hostnames: ["api.local"], desc: "api", isEnabled: true),
+            ParsedHostEntry(ip: "10.0.0.2", hostnames: ["db.local"], isEnabled: false)
+        ]
+        #expect(HostsParser.entriesEquivalent(base, base))
+        #expect(!HostsParser.entriesEquivalent(base, Array(base.reversed())))
+        #expect(!HostsParser.entriesEquivalent(
+            base,
+            [
+                ParsedHostEntry(ip: "10.0.0.1", hostnames: ["api.local"], desc: "api", isEnabled: false),
+                base[1]
+            ]
+        ))
+        #expect(!HostsParser.entriesEquivalent(
+            base,
+            [
+                ParsedHostEntry(ip: "10.0.0.1", hostnames: ["api.local"], desc: "changed"),
+                base[1]
+            ]
+        ))
+    }
+
     @Test func roundTripSerialization() {
         let entries = [
             ParsedHostEntry(ip: "127.0.0.1", hostnames: ["localhost"], desc: "loop"),
@@ -218,6 +241,69 @@ struct HostsReconciliationTests {
             )
         )
     }
+
+    @Test func persistedBaselineRecoversEmptyPendingSelection() {
+        let suiteName = "hosts-manager-tests-\(UUID().uuidString)"
+        guard let defaults = UserDefaults(suiteName: suiteName) else {
+            Issue.record("Expected an isolated UserDefaults suite")
+            return
+        }
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let profileID = UUID()
+
+        HostsReconciliationBaselineStore.markPendingWrite(
+            fingerprint: HostsReconciliation.canonical("10.0.0.1 api.local\n"),
+            appliedProfileIDs: [],
+            from: defaults
+        )
+        let baseline = HostsReconciliationBaselineStore.load(from: defaults)
+
+        #expect(baseline?.pendingAppliedProfileIDs == [])
+        #expect(baseline?.stateCommitFailed == true)
+        #expect(
+            HostsRecoveryPlanner.resolve(
+                baseline: baseline,
+                liveContent: "10.0.0.2 changed.local\n"
+            ) == .reapplyProfiles([])
+        )
+
+        HostsReconciliationBaselineStore.save(
+            HostsReconciliationBaseline(
+                fingerprint: HostsReconciliation.canonical("10.0.0.1 api.local\n"),
+                appliedProfileIDs: [profileID],
+                pendingAppliedProfileIDs: nil,
+                stateCommitFailed: false
+            ),
+            to: defaults
+        )
+        #expect(
+            HostsRecoveryPlanner.resolve(
+                baseline: HostsReconciliationBaselineStore.load(from: defaults),
+                liveContent: "10.0.0.2 changed.local\n"
+            ) == .keepSystemFile
+        )
+    }
+
+    @Test func persistedBaselineSupportsAnEmptyFingerprint() {
+        let suiteName = "hosts-manager-tests-\(UUID().uuidString)"
+        guard let defaults = UserDefaults(suiteName: suiteName) else {
+            Issue.record("Expected an isolated UserDefaults suite")
+            return
+        }
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+
+        HostsReconciliationBaselineStore.save(
+            HostsReconciliationBaseline(
+                fingerprint: "",
+                appliedProfileIDs: [],
+                pendingAppliedProfileIDs: nil,
+                stateCommitFailed: false
+            ),
+            to: defaults
+        )
+
+        #expect(HostsReconciliationBaselineStore.load(from: defaults)?.fingerprint == "")
+    }
 }
 
 @MainActor
@@ -277,6 +363,39 @@ struct ProfileAppliedStateTests {
         #expect(!custom.isAppliedForSystem)
         #expect(profiles.filter(\.isSystem).allSatisfy { !$0.isAppliedForSystem })
     }
+
+    @Test func exactAppliedSelectionClearsUnselectedAndSupportsEmpty() throws {
+        let controller = PersistenceController(inMemory: true)
+        let context = controller.container.viewContext
+        let profiles = try context.fetch(Profile.fetchRequest())
+            .filter { !$0.isSystem }
+        guard let first = profiles.first,
+              let second = profiles.dropFirst().first ?? makeProfile(in: context) else {
+            Issue.record("Expected two user profiles")
+            return
+        }
+        first.setApplied(true)
+        second.setApplied(true)
+        try context.save()
+
+        try setAppliedProfileSelection([first.id!], context: context)
+        try context.save()
+        #expect(first.isAppliedForSystem)
+        #expect(!second.isAppliedForSystem)
+
+        try setAppliedProfileSelection([], context: context)
+        try context.save()
+        #expect(profiles.allSatisfy { !$0.isAppliedForSystem })
+    }
+
+    private func makeProfile(in context: NSManagedObjectContext) -> Profile? {
+        let profile = Profile(context: context)
+        profile.id = UUID()
+        profile.name = "Test"
+        profile.createdAt = Date()
+        profile.updatedAt = Date()
+        return profile
+    }
 }
 
 struct HelperContractTests {
@@ -302,6 +421,30 @@ struct BackupManagerTests {
         #expect(BackupManager.listBackups(in: dir).count == 3)
         BackupManager.prune(keeping: 1, in: dir)
         #expect(BackupManager.listBackups(in: dir).count == 1)
+    }
+
+    @Test func pruneKeepsProtectedBackupPaths() throws {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        let oldest = try BackupManager.createBackup(of: "a", in: dir)
+        _ = try BackupManager.createBackup(of: "b", in: dir)
+        _ = try BackupManager.createBackup(of: "c", in: dir)
+
+        BackupManager.prune(
+            keeping: 1,
+            in: dir,
+            excluding: [oldest.path]
+        )
+
+        let remaining = BackupManager.listBackups(in: dir)
+        #expect(remaining.count == 2)
+        #expect(
+            remaining.contains {
+                $0.standardizedFileURL.path == oldest.standardizedFileURL.path
+            }
+        )
     }
 }
 
@@ -434,7 +577,10 @@ struct WriteCoordinatorTests {
         let coordinator = HostsWriteCoordinator(access: access, backupDirectory: directory)
         let content = "127.0.0.1 localhost\n10.0.0.1 api.local\n"
 
-        let result = try await coordinator.write(content)
+        let result = try await coordinator.write(
+            content,
+            expectedCurrentFingerprint: HostsReconciliation.canonical(access.content)
+        )
         #expect(try String(contentsOf: result.backupURL, encoding: .utf8) == "127.0.0.1 localhost\n")
         #expect(result.content == content)
         #expect(access.content == content)
@@ -452,13 +598,21 @@ struct WriteCoordinatorTests {
         let firstContent = "127.0.0.1 localhost\n10.0.0.1 api.local\n"
         let secondContent = "127.0.0.1 localhost\n10.0.0.2 db.local\n"
 
-        let firstWrite = Task { try await coordinator.write(firstContent) }
+        let firstWrite = Task {
+            try await coordinator.write(
+                firstContent,
+                expectedCurrentFingerprint: HostsReconciliation.canonical(access.content)
+            )
+        }
         while !access.started {
             await Task.yield()
         }
 
         // 第二次写入不再因并发而失败，而是排队执行。
-        let secondResult = try await coordinator.write(secondContent)
+        let secondResult = try await coordinator.write(
+            secondContent,
+            expectedCurrentFingerprint: HostsReconciliation.canonical(access.content)
+        )
         let firstResult = try await firstWrite.value
 
         #expect(access.content == secondContent)
@@ -477,12 +631,28 @@ struct WriteCoordinatorTests {
         let access = DelayedHostsAccess(content: "127.0.0.1 localhost\n")
         let coordinator = HostsWriteCoordinator(access: access, backupDirectory: directory)
 
-        let first = Task { try await coordinator.write("127.0.0.1 localhost\n10.0.0.1 a.local\n") }
+        let initialFingerprint = HostsReconciliation.canonical(access.content)
+        let first = Task {
+            try await coordinator.write(
+                "127.0.0.1 localhost\n10.0.0.1 a.local\n",
+                expectedCurrentFingerprint: initialFingerprint
+            )
+        }
         while !access.started {
             await Task.yield()
         }
-        let second = Task { try await coordinator.write("127.0.0.1 localhost\n10.0.0.2 b.local\n") }
-        let third = Task { try await coordinator.write("127.0.0.1 localhost\n10.0.0.3 c.local\n") }
+        let second = Task {
+            try await coordinator.write(
+                "127.0.0.1 localhost\n10.0.0.2 b.local\n",
+                expectedCurrentFingerprint: initialFingerprint
+            )
+        }
+        let third = Task {
+            try await coordinator.write(
+                "127.0.0.1 localhost\n10.0.0.3 c.local\n",
+                expectedCurrentFingerprint: initialFingerprint
+            )
+        }
         // 让排队中的两次写入真正入队。
         for _ in 0..<4 {
             await Task.yield()
@@ -561,7 +731,7 @@ struct WriteCoordinatorTests {
         }
     }
 
-    @Test func continuesQueueAfterCommitFailure() async throws {
+    @Test func blocksQueueUntilCommitFailureIsReconciled() async throws {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -582,6 +752,18 @@ struct WriteCoordinatorTests {
             // Expected: the file is written, but the state transaction failed.
         }
 
+        do {
+            _ = try await coordinator.perform(
+                makeContent: { HostsWriteRequest(content: second) },
+                commit: { _ in }
+            )
+            Issue.record("Expected writes to stay blocked after a failed state commit")
+        } catch is HostsReconciliationRequiredError {
+            // Expected: the file and the saved model are temporarily divergent.
+        }
+        #expect(access.content == first)
+
+        coordinator.reconcile(currentContent: first)
         let result = try await coordinator.perform(
             makeContent: { HostsWriteRequest(content: second) },
             commit: { _ in }
@@ -618,6 +800,115 @@ struct WriteCoordinatorTests {
         #expect(result.content == content)
         #expect(access.content == content)
         #expect(!coordinator.isWriting)
+    }
+
+    @Test func rejectsWriteWhenFingerprintChangedBeforeQueueHead() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let access = InMemoryHostsAccess(content: "127.0.0.1 localhost\n")
+        let coordinator = HostsWriteCoordinator(access: access, backupDirectory: directory)
+        let firstContent = "127.0.0.1 localhost\n10.0.0.1 first.local\n"
+        _ = try await coordinator.write(
+            firstContent,
+            expectedCurrentFingerprint: HostsReconciliation.canonical(access.content)
+        )
+
+        // Simulate an external tool changing the file after the caller captured
+        // the fingerprint. Queue head validation must reject the queued write.
+        let staleFingerprint = HostsReconciliation.canonical(
+            firstContent
+        )
+        access.content = "127.0.0.1 localhost\n10.0.0.9 external.local\n"
+        #expect(staleFingerprint != HostsReconciliation.canonical(access.content))
+        do {
+            _ = try await coordinator.perform(
+                makeContent: {
+                    HostsWriteRequest(
+                        content: "127.0.0.1 localhost\n10.0.0.2 second.local\n",
+                        expectedCurrentFingerprint: staleFingerprint
+                    )
+                },
+                commit: { _ in }
+            )
+            Issue.record("Expected a reconciliation error")
+        } catch is HostsReconciliationRequiredError {
+            // Expected.
+        }
+
+        #expect(!access.content.contains("second.local"))
+    }
+
+    @Test func acceptsFingerprintFromEarlierInternalWrite() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let access = InMemoryHostsAccess(content: "127.0.0.1 localhost\n")
+        let coordinator = HostsWriteCoordinator(access: access, backupDirectory: directory)
+        let firstContent = "127.0.0.1 localhost\n10.0.0.1 first.local\n"
+        let secondContent = "127.0.0.1 localhost\n10.0.0.2 second.local\n"
+        let staleFingerprint = HostsReconciliation.canonical(access.content)
+
+        _ = try await coordinator.write(
+            firstContent,
+            expectedCurrentFingerprint: HostsReconciliation.canonical(access.content)
+        )
+        let result = try await coordinator.perform(
+            makeContent: {
+                HostsWriteRequest(
+                    content: secondContent,
+                    expectedCurrentFingerprint: staleFingerprint
+                )
+            },
+            commit: { _ in }
+        )
+
+        #expect(result.content == secondContent)
+        #expect(access.content == secondContent)
+    }
+
+    @Test func keepsBlockingUntilExternalContentIsReconciled() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let access = InMemoryHostsAccess(content: "127.0.0.1 localhost\n")
+        let coordinator = HostsWriteCoordinator(access: access, backupDirectory: directory)
+        let initial = HostsReconciliation.canonical(access.content)
+        access.content = "127.0.0.1 localhost\n10.0.0.9 external.local\n"
+        let external = access.content
+
+        do {
+            _ = try await coordinator.write(
+                "127.0.0.1 localhost\n10.0.0.2 blocked.local\n",
+                expectedCurrentFingerprint: initial
+            )
+            Issue.record("Expected the external edit to be rejected")
+        } catch is HostsReconciliationRequiredError {
+            // Expected.
+        }
+
+        do {
+            _ = try await coordinator.write(
+                "127.0.0.1 localhost\n10.0.0.3 still-blocked.local\n",
+                expectedCurrentFingerprint: HostsReconciliation.canonical(external)
+            )
+            Issue.record("Expected the external edit to stay blocked")
+        } catch is HostsReconciliationRequiredError {
+            // Expected.
+        }
+
+        coordinator.reconcile(currentContent: external)
+        let result = try await coordinator.write(
+            "127.0.0.1 localhost\n10.0.0.4 resolved.local\n",
+            expectedCurrentFingerprint: HostsReconciliation.canonical(external)
+        )
+        #expect(result.content.contains("resolved.local"))
     }
 }
 

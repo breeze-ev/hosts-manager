@@ -6,10 +6,8 @@ enum BackupMaintenance {
     static func prune(context: NSManagedObjectContext) throws {
         let retention = try context.fetch(AppSettings.fetchRequest()).first?.backupRetention ?? 30
 
-        // File retention runs first so records never point at files removed by
-        // this pass. Any orphan records are then removed in a rollback-safe save.
-        BackupManager.prune(keeping: max(1, Int(retention)))
-
+        // Remove orphan records before pruning files. The old order removed
+        // files first and could leave committed records pointing at deleted files.
         let records = try context.fetch(BackupRecord.fetchRequest())
         for record in records where !FileManager.default.fileExists(
             atPath: record.filePath ?? ""
@@ -24,5 +22,15 @@ enum BackupMaintenance {
                 throw error
             }
         }
+
+        let retainedPaths = Set(
+            try context.fetch(BackupRecord.fetchRequest())
+                .compactMap(\.filePath)
+                .map { URL(fileURLWithPath: $0).standardizedFileURL.path }
+        )
+        BackupManager.prune(
+            keeping: max(1, Int(retention)),
+            excluding: retainedPaths
+        )
     }
 }

@@ -2,7 +2,7 @@ import Foundation
 
 // MARK: - Parsed host entry
 
-struct ParsedHostEntry: Identifiable, Equatable {
+nonisolated struct ParsedHostEntry: Identifiable, Equatable {
     let id = UUID()
     var ip: String
     var hostnames: [String]
@@ -21,7 +21,7 @@ struct ParsedHostEntry: Identifiable, Equatable {
 
 // MARK: - Parser
 
-enum HostsParser {
+nonisolated enum HostsParser {
     static let systemIps: Set<String> = ["127.0.0.1", "::1", "255.255.255.255", "fe80::1%lo0", "0.0.0.0"]
     static let systemNames: Set<String> = ["localhost", "broadcasthost"]
     static let systemDefaults: [ParsedHostEntry] = [
@@ -108,6 +108,20 @@ enum HostsParser {
             return true
         }
     }
+
+    static func entriesEquivalent(
+        _ lhs: [ParsedHostEntry],
+        _ rhs: [ParsedHostEntry]
+    ) -> Bool {
+        guard lhs.count == rhs.count else { return false }
+        return zip(lhs, rhs).allSatisfy { left, right in
+            left.ip == right.ip &&
+                left.hostnames == right.hostnames &&
+                left.desc == right.desc &&
+                left.isEnabled == right.isEnabled &&
+                left.isSystem == right.isSystem
+        }
+    }
 }
 
 // MARK: - Conflict detection
@@ -138,7 +152,107 @@ enum HostsReconciliationState: Equatable {
     case unreadable
 }
 
-enum HostsReconciliation {
+nonisolated struct HostsReconciliationBaseline: Equatable {
+    let fingerprint: String
+    let appliedProfileIDs: [UUID]
+    let pendingAppliedProfileIDs: [UUID]?
+    let stateCommitFailed: Bool
+}
+
+nonisolated enum HostsReconciliationBaselineStore {
+    private static let fingerprintKey = "hostsReconciliation.fingerprint"
+    private static let appliedProfileIDsKey = "hostsReconciliation.appliedProfileIDs"
+    private static let pendingAppliedProfileIDsKey = "hostsReconciliation.pendingAppliedProfileIDs"
+    private static let stateCommitFailedKey = "hostsReconciliation.stateCommitFailed"
+
+    static func load(from defaults: UserDefaults = .standard) -> HostsReconciliationBaseline? {
+        guard let fingerprint = defaults.string(forKey: fingerprintKey) else {
+            return nil
+        }
+        let rawIDs = defaults.stringArray(forKey: appliedProfileIDsKey) ?? []
+        let pendingRawIDs = defaults.object(forKey: pendingAppliedProfileIDsKey) as? [String]
+        return HostsReconciliationBaseline(
+            fingerprint: fingerprint,
+            appliedProfileIDs: rawIDs.compactMap(UUID.init(uuidString:)),
+            pendingAppliedProfileIDs: pendingRawIDs?.compactMap(UUID.init(uuidString:)),
+            stateCommitFailed: defaults.bool(forKey: stateCommitFailedKey)
+        )
+    }
+
+    static func save(
+        _ baseline: HostsReconciliationBaseline,
+        to defaults: UserDefaults = .standard
+    ) {
+        write(baseline, to: defaults)
+        defaults.synchronize()
+    }
+
+    private static func write(
+        _ baseline: HostsReconciliationBaseline,
+        to defaults: UserDefaults
+    ) {
+        defaults.set(baseline.fingerprint, forKey: fingerprintKey)
+        defaults.set(
+            baseline.appliedProfileIDs.map(\.uuidString),
+            forKey: appliedProfileIDsKey
+        )
+        if let pending = baseline.pendingAppliedProfileIDs {
+            defaults.set(
+                pending.map(\.uuidString),
+                forKey: pendingAppliedProfileIDsKey
+            )
+        } else {
+            defaults.removeObject(forKey: pendingAppliedProfileIDsKey)
+        }
+        defaults.set(baseline.stateCommitFailed, forKey: stateCommitFailedKey)
+    }
+
+    /// Persist the intended selection before touching the system file. If the
+    /// process crashes between the file write and the Core Data save, launch
+    /// reconciliation can still restore the exact selection that was written.
+    static func setPendingAppliedProfileIDs(
+        _ profileIDs: [UUID],
+        from defaults: UserDefaults = .standard
+    ) {
+        defaults.set(
+            profileIDs.map(\.uuidString),
+            forKey: pendingAppliedProfileIDsKey
+        )
+    }
+
+    /// Record the exact file/state selection immediately after the system file
+    /// changes and before Core Data is saved.
+    static func markPendingWrite(
+        fingerprint: String,
+        appliedProfileIDs: [UUID],
+        from defaults: UserDefaults = .standard
+    ) {
+        save(
+            HostsReconciliationBaseline(
+                fingerprint: fingerprint,
+                appliedProfileIDs: appliedProfileIDs,
+                pendingAppliedProfileIDs: appliedProfileIDs,
+                stateCommitFailed: true
+            ),
+            to: defaults
+        )
+    }
+
+    static func clearPendingAppliedProfileIDs(
+        from defaults: UserDefaults = .standard
+    ) {
+        defaults.removeObject(forKey: pendingAppliedProfileIDsKey)
+    }
+
+    static func clear(from defaults: UserDefaults = .standard) {
+        defaults.removeObject(forKey: fingerprintKey)
+        defaults.removeObject(forKey: appliedProfileIDsKey)
+        defaults.removeObject(forKey: pendingAppliedProfileIDsKey)
+        defaults.removeObject(forKey: stateCommitFailedKey)
+    }
+}
+
+nonisolated enum HostsReconciliation {
     /// Compares the live file with the content produced by the currently
     /// applied profiles. The comparison is canonical so formatting or comment
     /// changes do not produce a false external-edit warning.
@@ -224,10 +338,20 @@ enum BackupManager {
             .sorted { ($0.fileModificationDate ?? .distantPast) > ($1.fileModificationDate ?? .distantPast) }
     }
 
-    static func prune(keeping count: Int, in directory: URL? = nil) {
+    static func prune(
+        keeping count: Int,
+        in directory: URL? = nil,
+        excluding protectedPaths: Set<String> = []
+    ) {
         let backups = listBackups(in: directory)
-        guard count >= 0, backups.count > count else { return }
-        for url in backups.dropFirst(count) {
+        let normalizedProtectedPaths = Set(
+            protectedPaths.map { URL(fileURLWithPath: $0).standardizedFileURL.path }
+        )
+        let candidates = backups.filter {
+            !normalizedProtectedPaths.contains($0.standardizedFileURL.path)
+        }
+        guard count >= 0, candidates.count > count else { return }
+        for url in candidates.dropFirst(count) {
             try? FileManager.default.removeItem(at: url)
         }
     }
