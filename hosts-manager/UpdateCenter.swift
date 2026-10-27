@@ -379,6 +379,18 @@ extension Notification.Name {
     static let closeUpdateWindow = Notification.Name("UpdateCenterCloseWindow")
 }
 
+nonisolated enum ReleaseNotesFormatter {
+    static func attributedString(
+        from markdown: String,
+        baseURL: URL
+    ) -> AttributedString {
+        var options = AttributedString.MarkdownParsingOptions()
+        options.interpretedSyntax = .inlineOnlyPreservingWhitespace
+        return (try? AttributedString(markdown: markdown, options: options, baseURL: baseURL))
+            ?? AttributedString(markdown)
+    }
+}
+
 nonisolated final class URLSessionUpdateTransport: UpdateTransport {
     nonisolated private let apiSession: URLSession
     nonisolated private let downloadSession: URLSession
@@ -1184,15 +1196,6 @@ struct UpdateSheet: View {
                 .foregroundStyle(.secondary)
             }
             Spacer()
-            Button {
-                updateCenter.publishPanelDismissal()
-            } label: {
-                Image(systemName: "xmark")
-                    .frame(width: 24, height: 24)
-            }
-            .buttonStyle(.borderless)
-            .help(l10n.s("稍后", "Later"))
-            .accessibilityIdentifier("update-close-button")
         }
         .padding(.horizontal, 24)
         .padding(.vertical, 18)
@@ -1297,16 +1300,28 @@ struct UpdateSheet: View {
             VStack(alignment: .leading, spacing: 8) {
                 Text(l10n.s("发布说明", "Release Notes"))
                     .font(.system(size: 13, weight: .semibold))
-                Text(release.releaseNotes.isEmpty
-                    ? l10n.s("此版本没有提供发布说明。", "No release notes were provided.")
-                    : release.releaseNotes)
-                    .font(.system(size: 13))
-                    .foregroundStyle(.secondary)
-                    .textSelection(.enabled)
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                if release.releaseNotes.isEmpty {
+                    Text(l10n.s("此版本没有提供发布说明。", "No release notes were provided."))
+                        .font(.system(size: 13))
+                        .foregroundStyle(.secondary)
+                } else {
+                    Text(ReleaseNotesFormatter.attributedString(
+                        from: release.releaseNotes,
+                        baseURL: release.pageURL
+                    ))
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
             }
             .padding(14)
-            .background(RoundedRectangle(cornerRadius: 12).fill(.quaternary.opacity(0.12)))
+            .background(
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(Color(nsColor: .controlBackgroundColor))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 12)
+                    .stroke(.quaternary.opacity(0.5))
+            )
         }
     }
 
