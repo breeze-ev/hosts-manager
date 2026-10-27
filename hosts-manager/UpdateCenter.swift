@@ -1185,14 +1185,7 @@ struct UpdateSheet: View {
     }
 
     private var header: some View {
-        HStack(alignment: .top, spacing: 14) {
-            TrafficLightCloseButton {
-                updateCenter.publishPanelDismissal()
-            }
-            .accessibilityIdentifier("update-close-button")
-            .accessibilityLabel(l10n.s("稍后", "Later"))
-            .padding(.top, 4)
-
+        HStack(spacing: 14) {
             Image(systemName: "arrow.down.circle.dotted")
                 .font(.system(size: 28, weight: .medium))
                 .foregroundStyle(Color.accentColor)
@@ -1553,40 +1546,6 @@ struct UpdateSheet: View {
             return l10n.s("无法标记下载文件。", "The downloaded file could not be quarantined.")
         case .open:
             return l10n.s("无法打开更新包。", "The update package could not be opened.")
-        }
-    }
-}
-
-private struct TrafficLightCloseButton: NSViewRepresentable {
-    let action: () -> Void
-
-    func makeNSView(context: Context) -> NSButton {
-        let button = NSWindow.standardWindowButton(
-            .closeButton,
-            for: [.titled, .closable, .miniaturizable]
-        ) ?? NSButton(title: "", target: nil, action: nil)
-        button.target = context.coordinator
-        button.action = #selector(Coordinator.close)
-        return button
-    }
-
-    func updateNSView(_ nsView: NSButton, context: Context) {
-        nsView.target = context.coordinator
-    }
-
-    func makeCoordinator() -> Coordinator {
-        Coordinator(action: action)
-    }
-
-    final class Coordinator: NSObject {
-        let action: () -> Void
-
-        init(action: @escaping () -> Void) {
-            self.action = action
-        }
-
-        @objc func close() {
-            action()
         }
     }
 }
