@@ -17,21 +17,21 @@ struct HostsWriteResult: Equatable, Sendable {
 
 struct HostsWriteRequest: Sendable {
     let content: String
-    /// Fingerprint of the file the caller believes is still current. `nil`
-    /// explicitly allows an overwrite, such as restoring a backup.
-    let expectedCurrentFingerprint: String?
     /// Exact profile selection represented by `content`. Persisting this before
     /// the Core Data commit makes an interrupted write recoverable after relaunch.
     let appliedProfileIDs: [UUID]?
+    /// Hostnames whose mappings were generated from profile definitions. Keeping
+    /// the previous set lets a later edit remove renamed or deleted profile rows.
+    let managedHostnames: [String]
 
     init(
         content: String,
-        expectedCurrentFingerprint: String? = nil,
-        appliedProfileIDs: [UUID]? = nil
+        appliedProfileIDs: [UUID]? = nil,
+        managedHostnames: [String] = []
     ) {
         self.content = content
-        self.expectedCurrentFingerprint = expectedCurrentFingerprint
         self.appliedProfileIDs = appliedProfileIDs
+        self.managedHostnames = managedHostnames
     }
 }
 
@@ -43,7 +43,7 @@ struct HostsWriteCommitError: Error {
 
 struct HostsWriteStateReconciliationError: Error {}
 
-struct HostsReconciliationRequiredError: Error {}
+struct HostsStateRecoveryRequiredError: Error {}
 
 struct SystemHostsFileAccess: HostsFileAccess {
     func read() throws -> String {
@@ -61,8 +61,8 @@ struct SystemHostsFileAccess: HostsFileAccess {
 /// 实时应用三处各自重试：快速连续操作时会出现“文件其实写成功了、
 /// 界面却弹写入失败并把状态回滚”的割裂。
 ///
-/// 每个请求都会执行，不合并内容。`perform` 在队列轮到自己时才计算目标内容，
-/// 并在下一次写入开始前完成状态提交，因此后一个请求能看到前一个请求提交后的配置状态。
+/// 每个请求都会执行。`perform` 在队列轮到自己时读取最新文件并生成目标内容，
+/// 在下一次写入开始前完成状态提交，因此后一个请求能看到前一个请求提交后的配置状态。
 @MainActor
 final class HostsWriteCoordinator: ObservableObject {
     static let shared = HostsWriteCoordinator(access: SystemHostsFileAccess())
@@ -74,38 +74,27 @@ final class HostsWriteCoordinator: ObservableObject {
 
     private var tail: Task<Void, Never>?
     private var pendingOperationCount = 0
-    /// The file content written by this coordinator. A queued request may
-    /// carry a fingerprint from before an earlier internal write completed;
-    /// matching this value proves the intervening change was not external.
-    private var lastWrittenFingerprint: String?
-    /// The file must not be overwritten until the app has surfaced a
-    /// reconciliation choice for an external edit or a failed state commit.
-    private var requiresReconciliation = false
+    /// Writes stay blocked only when a successful file write could not commit
+    /// its matching Core Data state. External file edits never set this flag.
+    private var requiresStateRecovery = false
 
     init(access: any HostsFileAccess, backupDirectory: URL? = nil) {
         self.access = access
         self.backupDirectory = backupDirectory
     }
 
-    func write(
-        _ content: String,
-        expectedCurrentFingerprint: String?
-    ) async throws -> HostsWriteResult {
+    func write(_ content: String) async throws -> HostsWriteResult {
         try await perform(
-            makeContent: {
-                HostsWriteRequest(
-                    content: content,
-                    expectedCurrentFingerprint: expectedCurrentFingerprint
-                )
-            },
+            makeContent: { _ in HostsWriteRequest(content: content) },
             commit: { _ in }
         )
     }
 
     /// Serializes content generation, the privileged file write, and state commit.
-    /// `makeContent` runs only after all previously queued operations have committed.
+    /// `makeContent` runs at the queue head and receives the current system file,
+    /// allowing profile writes to merge external edits automatically.
     func perform(
-        makeContent: @escaping @MainActor () throws -> HostsWriteRequest,
+        makeContent: @escaping @MainActor (String) throws -> HostsWriteRequest,
         commit: @escaping @MainActor (HostsWriteResult) throws -> Void
     ) async throws -> HostsWriteResult {
         let previous = tail
@@ -118,22 +107,24 @@ final class HostsWriteCoordinator: ObservableObject {
             defer { self.finishOperation() }
 
             do {
-                guard !self.requiresReconciliation else {
-                    throw HostsReconciliationRequiredError()
+                guard !self.requiresStateRecovery else {
+                    throw HostsStateRecoveryRequiredError()
                 }
-                let request = try makeContent()
+                let current = try self.access.read()
+                let request = try makeContent(current)
                 if let validationError = HostsValueValidator.validate(content: request.content) {
                     throw HostsWriteError.invalidContent(validationError)
                 }
-                let result = try await self.performWrite(request)
+                let result = try await self.performWrite(request, current: current)
                 do {
                     try commit(result)
                 } catch {
-                    self.requiresReconciliation = true
+                    self.requiresStateRecovery = true
                     if let appliedProfileIDs = request.appliedProfileIDs {
-                        self.requiresReconciliationAfterStateCommitFailure(
+                        self.requiresStateRecoveryAfterCommitFailure(
                             content: result.content,
-                            appliedProfileIDs: appliedProfileIDs
+                            appliedProfileIDs: appliedProfileIDs,
+                            managedHostnames: request.managedHostnames
                         )
                     }
                     return .failure(HostsWriteCommitError(result: result, underlying: error))
@@ -144,16 +135,21 @@ final class HostsWriteCoordinator: ObservableObject {
                             fingerprint: HostsReconciliation.canonical(result.content),
                             appliedProfileIDs: appliedProfileIDs,
                             pendingAppliedProfileIDs: nil,
+                            managedHostnames: request.managedHostnames,
                             stateCommitFailed: false
                         )
                     )
                 }
+                var userInfo: [AnyHashable: Any] = [
+                    HostsStateNotificationKey.managedHostnames: request.managedHostnames
+                ]
+                if let appliedProfileIDs = request.appliedProfileIDs {
+                    userInfo[HostsStateNotificationKey.appliedProfileIDs] = appliedProfileIDs
+                }
                 NotificationCenter.default.post(
                     name: .hostsStateSynchronized,
                     object: result.content,
-                    userInfo: request.appliedProfileIDs.map {
-                        [HostsStateNotificationKey.appliedProfileIDs: $0]
-                    }
+                    userInfo: userInfo
                 )
                 return .success(result)
             } catch {
@@ -174,28 +170,23 @@ final class HostsWriteCoordinator: ObservableObject {
         }
     }
 
-    private func performWrite(_ request: HostsWriteRequest) async throws -> HostsWriteResult {
-        let current = try access.read()
-        let currentFingerprint = HostsReconciliation.canonical(current)
-        if requiresReconciliation {
-            throw HostsReconciliationRequiredError()
-        }
-        if let expected = request.expectedCurrentFingerprint {
-            let internalFingerprint = lastWrittenFingerprint
-            guard currentFingerprint == expected || currentFingerprint == internalFingerprint else {
-                requiresReconciliation = true
-                throw HostsReconciliationRequiredError()
-            }
+    private func performWrite(
+        _ request: HostsWriteRequest,
+        current: String
+    ) async throws -> HostsWriteResult {
+        if requiresStateRecovery {
+            throw HostsStateRecoveryRequiredError()
         }
         let backupURL = try BackupManager.createBackup(of: current, in: backupDirectory)
         try await access.write(request.content)
         let verifiedContent = try access.read()
         guard verifiedContent == request.content else {
-            requiresReconciliation = true
+            requiresStateRecovery = true
             if let appliedProfileIDs = request.appliedProfileIDs {
                 HostsReconciliationBaselineStore.markPendingWrite(
                     fingerprint: HostsReconciliation.canonical(verifiedContent),
-                    appliedProfileIDs: appliedProfileIDs
+                    appliedProfileIDs: appliedProfileIDs,
+                    managedHostnames: request.managedHostnames
                 )
             }
             throw HostsWriteError.verificationFailed
@@ -203,34 +194,32 @@ final class HostsWriteCoordinator: ObservableObject {
         if let appliedProfileIDs = request.appliedProfileIDs {
             HostsReconciliationBaselineStore.markPendingWrite(
                 fingerprint: HostsReconciliation.canonical(verifiedContent),
-                appliedProfileIDs: appliedProfileIDs
+                appliedProfileIDs: appliedProfileIDs,
+                managedHostnames: request.managedHostnames
             )
         }
-        lastWrittenFingerprint = HostsReconciliation.canonical(verifiedContent)
-        requiresReconciliation = false
         NotificationCenter.default.post(name: .hostsContentChanged, object: request.content)
         return HostsWriteResult(content: request.content, backupURL: backupURL)
     }
 
-    /// Clears an external-edit block after the user explicitly chose to keep
-    /// the live file or overwrite it with the current applied selection.
-    func reconcile(currentContent: String) {
-        lastWrittenFingerprint = HostsReconciliation.canonical(currentContent)
-        requiresReconciliation = false
+    /// Clears the write block after the user resolves a failed state commit.
+    func clearStateRecovery() {
+        requiresStateRecovery = false
     }
 
     /// Leave the queue blocked and persist the exact state that existed when a
     /// file write succeeded but its Core Data commit failed.
-    func requiresReconciliationAfterStateCommitFailure(
+    func requiresStateRecoveryAfterCommitFailure(
         content: String,
-        appliedProfileIDs: [UUID]
+        appliedProfileIDs: [UUID],
+        managedHostnames: [String]
     ) {
         let fingerprint = HostsReconciliation.canonical(content)
-        lastWrittenFingerprint = fingerprint
-        requiresReconciliation = true
+        requiresStateRecovery = true
         HostsReconciliationBaselineStore.markPendingWrite(
             fingerprint: fingerprint,
-            appliedProfileIDs: appliedProfileIDs
+            appliedProfileIDs: appliedProfileIDs,
+            managedHostnames: managedHostnames
         )
     }
 }

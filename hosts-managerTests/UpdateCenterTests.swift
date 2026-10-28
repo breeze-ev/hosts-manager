@@ -53,6 +53,68 @@ struct UpdateVersionTests {
 }
 
 struct UpdateReleaseMapperTests {
+    @Test func parsesSimpleBlockMarkdown() throws {
+        let baseURL = try #require(URL(string: "https://github.com/breeze-ev/hosts-manager"))
+        let markdown = """
+        # Release
+
+        **Fixed** startup.
+
+        - [Changelog](/compare/v1.0.0...v1.2.0)
+        - Use `reset`
+
+        1. First
+        2. Second
+
+        ```sh
+        open Hosts.app
+        ```
+        """
+
+        let blocks = ReleaseNotesFormatter.blocks(from: markdown, baseURL: baseURL)
+
+        guard case .heading(let level, let heading) = blocks[0] else {
+            Issue.record("Expected heading")
+            return
+        }
+        #expect(level == 1)
+        #expect(String(heading.characters) == "Release")
+
+        guard case .paragraph(let paragraph) = blocks[1] else {
+            Issue.record("Expected paragraph")
+            return
+        }
+        #expect(String(paragraph.characters) == "Fixed startup.")
+
+        guard case .list(let ordered, let start, let bullets) = blocks[2] else {
+            Issue.record("Expected unordered list")
+            return
+        }
+        #expect(!ordered)
+        #expect(start == 1)
+        #expect(bullets.count == 2)
+        guard case .paragraph(let firstBullet) = bullets[0].blocks[0] else {
+            Issue.record("Expected paragraph in bullet")
+            return
+        }
+        #expect(String(firstBullet.characters) == "Changelog")
+        #expect(firstBullet.runs.first?.link?.absoluteString == "https://github.com/compare/v1.0.0...v1.2.0")
+
+        guard case .list(let orderedNumbers, let firstNumber, let numbered) = blocks[3] else {
+            Issue.record("Expected ordered list")
+            return
+        }
+        #expect(orderedNumbers)
+        #expect(firstNumber == 1)
+        #expect(numbered.count == 2)
+
+        guard case .code(_, let code) = blocks[4] else {
+            Issue.record("Expected code block")
+            return
+        }
+        #expect(code == "open Hosts.app")
+    }
+
     @Test func choosesArchitectureCaseInsensitively() throws {
         let release = makeGitHubRelease(assets: [
             asset("Hosts-Manager-1.2.0-ARM64.DMG")

@@ -119,18 +119,12 @@ nonisolated enum HostsRecoveryAction: Equatable {
 
 nonisolated enum HostsRecoveryPlanner {
     static func resolve(
-        baseline: HostsReconciliationBaseline?,
-        liveContent: String?
+        baseline: HostsReconciliationBaseline?
     ) -> HostsRecoveryAction? {
-        guard let baseline else { return nil }
-        guard let liveContent else { return nil }
-        let live = HostsReconciliation.canonical(liveContent)
-        guard live != baseline.fingerprint else { return nil }
-        return baseline.stateCommitFailed
-            ? .reapplyProfiles(
-                baseline.pendingAppliedProfileIDs ?? baseline.appliedProfileIDs
-            )
-            : .keepSystemFile
+        guard let baseline, baseline.stateCommitFailed else { return nil }
+        return .reapplyProfiles(
+            baseline.pendingAppliedProfileIDs ?? baseline.appliedProfileIDs
+        )
     }
 }
 

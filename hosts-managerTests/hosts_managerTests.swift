@@ -166,6 +166,136 @@ struct HostValidatorTests {
     }
 }
 
+struct HostsContentMergerTests {
+    @Test func preservesExternalEntriesAndInlineComments() {
+        let live = """
+        127.0.0.1 localhost
+        10.0.0.9 external.local # added externally
+        # 10.0.0.10 disabled.local
+        # a standalone comment is not data
+        """
+        let managed = [
+            ParsedHostEntry(ip: "10.0.0.1", hostnames: ["api.local"])
+        ]
+
+        let result = HostsContentMerger.merge(
+            liveContent: live,
+            managedEntries: managed,
+            ownedHostnames: ["api.local"]
+        )
+
+        let canonical = HostsReconciliation.canonical(result)
+        #expect(canonical.contains("10.0.0.9|external.local"))
+        #expect(canonical.contains("10.0.0.1|api.local"))
+        #expect(
+            HostsParser.parse(result).contains {
+                $0.ip == "10.0.0.10"
+                    && $0.hostnames == ["disabled.local"]
+                    && !$0.isEnabled
+            }
+        )
+        #expect(result.contains("# added externally"))
+        #expect(!result.contains("standalone comment"))
+    }
+
+    @Test func activeConfigurationWinsAndMixedLinesAreSplit() {
+        let live = """
+        10.0.0.9 external.local managed.local # external value
+        """
+        let managed = [
+            ParsedHostEntry(ip: "10.0.0.1", hostnames: ["managed.local"])
+        ]
+
+        let result = HostsContentMerger.merge(
+            liveContent: live,
+            managedEntries: managed,
+            ownedHostnames: ["managed.local"]
+        )
+
+        let canonical = HostsReconciliation.canonical(result)
+        #expect(canonical.contains("10.0.0.1|managed.local"))
+        #expect(!canonical.contains("10.0.0.9|managed.local"))
+        #expect(canonical.contains("10.0.0.9|external.local"))
+        #expect(result.contains("# external value"))
+    }
+
+    @Test func safeDedupeOnlyCollapsesIdenticalMappings() {
+        let live = """
+        10.0.0.9 duplicate.local
+        10.0.0.9 duplicate.local
+        10.0.0.10 same-name.local
+        10.0.0.11 same-name.local
+        """
+
+        let result = HostsContentMerger.merge(
+            liveContent: live,
+            managedEntries: [],
+            ownedHostnames: []
+        )
+
+        let canonical = HostsReconciliation.canonical(result)
+        #expect(canonical.components(separatedBy: "10.0.0.9|duplicate.local").count - 1 == 1)
+        #expect(canonical.contains("10.0.0.10|same-name.local"))
+        #expect(canonical.contains("10.0.0.11|same-name.local"))
+    }
+
+    @Test func inactiveProfileStillOwnsItsHostnames() {
+        let live = """
+        10.0.0.9 managed.local
+        10.0.0.8 external.local
+        """
+
+        let result = HostsContentMerger.merge(
+            liveContent: live,
+            managedEntries: [],
+            ownedHostnames: ["managed.local"]
+        )
+
+        let canonical = HostsReconciliation.canonical(result)
+        #expect(!canonical.contains("managed.local"))
+        #expect(canonical.contains("10.0.0.8|external.local"))
+    }
+
+    @Test func previousManagedHostnamesRemoveRenamedEntries() {
+        let result = HostsContentMerger.merge(
+            liveContent: "10.0.0.1 old.local\n10.0.0.9 external.local\n",
+            managedEntries: [
+                ParsedHostEntry(ip: "10.0.0.2", hostnames: ["new.local"])
+            ],
+            ownedHostnames: ["old.local", "new.local"]
+        )
+
+        let canonical = HostsReconciliation.canonical(result)
+        #expect(!canonical.contains("old.local"))
+        #expect(canonical.contains("10.0.0.2|new.local"))
+        #expect(canonical.contains("10.0.0.9|external.local"))
+    }
+
+    @Test func mergeIsIdempotent() {
+        let live = """
+        10.0.0.9 external.local
+        10.0.0.1 managed.local
+        """
+        let managed = [
+            ParsedHostEntry(ip: "10.0.0.2", hostnames: ["managed.local"])
+        ]
+        let owned: Set<String> = ["managed.local"]
+
+        let first = HostsContentMerger.merge(
+            liveContent: live,
+            managedEntries: managed,
+            ownedHostnames: owned
+        )
+        let second = HostsContentMerger.merge(
+            liveContent: first,
+            managedEntries: managed,
+            ownedHostnames: owned
+        )
+
+        #expect(first == second)
+    }
+}
+
 struct HostsReconciliationTests {
     @Test func canonicalComparisonIgnoresFormattingAndOrdering() {
         let live = """
@@ -179,66 +309,12 @@ struct HostsReconciliationTests {
         """
 
         #expect(
-            HostsReconciliation.inspect(
-                liveContent: live,
-                expectedContent: expected,
-                hasActiveProfiles: true
-            ) == .inSync
-        )
-    }
-
-    @Test func detectsExternalContentAndUnreadableFile() {
-        let expected = "10.0.0.1 api.local\n"
-        #expect(
-            HostsReconciliation.inspect(
-                liveContent: "10.0.0.2 api.local\n",
-                expectedContent: expected,
-                hasActiveProfiles: true
-            ) == .externalContent
+            HostsReconciliation.canonical(live)
+                == HostsReconciliation.canonical(expected)
         )
         #expect(
-            HostsReconciliation.inspect(
-                liveContent: nil,
-                expectedContent: expected,
-                hasActiveProfiles: true
-            ) == .unreadable
-        )
-    }
-
-    @Test func noActiveProfilesSkipsReconciliationWarning() {
-        #expect(
-            HostsReconciliation.inspect(
-                liveContent: "10.0.0.9 external.local\n",
-                expectedContent: "",
-                hasActiveProfiles: false
-            ) == .noActiveProfiles
-        )
-    }
-
-    @Test func reconciliationRequiresTrustedBaselineOrMatchingFile() {
-        let content = "10.0.0.1 api.local\n"
-        let fingerprint = HostsReconciliation.canonical(content)
-
-        #expect(
-            HostsReconciliation.requiresReconciliation(
-                liveContent: content,
-                lastKnownFingerprint: fingerprint,
-                stateCommitFailed: false
-            ) == false
-        )
-        #expect(
-            HostsReconciliation.requiresReconciliation(
-                liveContent: content,
-                lastKnownFingerprint: nil,
-                stateCommitFailed: false
-            )
-        )
-        #expect(
-            HostsReconciliation.requiresReconciliation(
-                liveContent: content,
-                lastKnownFingerprint: fingerprint,
-                stateCommitFailed: true
-            )
+            HostsReconciliation.canonical(live)
+                != HostsReconciliation.canonical("10.0.0.9 external.local\n")
         )
     }
 
@@ -254,16 +330,17 @@ struct HostsReconciliationTests {
         HostsReconciliationBaselineStore.markPendingWrite(
             fingerprint: HostsReconciliation.canonical("10.0.0.1 api.local\n"),
             appliedProfileIDs: [],
+            managedHostnames: ["api.local"],
             from: defaults
         )
         let baseline = HostsReconciliationBaselineStore.load(from: defaults)
 
         #expect(baseline?.pendingAppliedProfileIDs == [])
+        #expect(baseline?.managedHostnames == ["api.local"])
         #expect(baseline?.stateCommitFailed == true)
         #expect(
             HostsRecoveryPlanner.resolve(
-                baseline: baseline,
-                liveContent: "10.0.0.2 changed.local\n"
+                baseline: baseline
             ) == .reapplyProfiles([])
         )
 
@@ -272,15 +349,15 @@ struct HostsReconciliationTests {
                 fingerprint: HostsReconciliation.canonical("10.0.0.1 api.local\n"),
                 appliedProfileIDs: [profileID],
                 pendingAppliedProfileIDs: nil,
+                managedHostnames: ["api.local"],
                 stateCommitFailed: false
             ),
             to: defaults
         )
         #expect(
             HostsRecoveryPlanner.resolve(
-                baseline: HostsReconciliationBaselineStore.load(from: defaults),
-                liveContent: "10.0.0.2 changed.local\n"
-            ) == .keepSystemFile
+                baseline: HostsReconciliationBaselineStore.load(from: defaults)
+            ) == nil
         )
     }
 
@@ -297,6 +374,7 @@ struct HostsReconciliationTests {
                 fingerprint: "",
                 appliedProfileIDs: [],
                 pendingAppliedProfileIDs: nil,
+                managedHostnames: [],
                 stateCommitFailed: false
             ),
             to: defaults
@@ -600,10 +678,7 @@ struct WriteCoordinatorTests {
         let coordinator = HostsWriteCoordinator(access: access, backupDirectory: directory)
         let content = "127.0.0.1 localhost\n10.0.0.1 api.local\n"
 
-        let result = try await coordinator.write(
-            content,
-            expectedCurrentFingerprint: HostsReconciliation.canonical(access.content)
-        )
+        let result = try await coordinator.write(content)
         #expect(try String(contentsOf: result.backupURL, encoding: .utf8) == "127.0.0.1 localhost\n")
         #expect(result.content == content)
         #expect(access.content == content)
@@ -622,20 +697,14 @@ struct WriteCoordinatorTests {
         let secondContent = "127.0.0.1 localhost\n10.0.0.2 db.local\n"
 
         let firstWrite = Task {
-            try await coordinator.write(
-                firstContent,
-                expectedCurrentFingerprint: HostsReconciliation.canonical(access.content)
-            )
+            try await coordinator.write(firstContent)
         }
         while !access.started {
             await Task.yield()
         }
 
         // 第二次写入不再因并发而失败，而是排队执行。
-        let secondResult = try await coordinator.write(
-            secondContent,
-            expectedCurrentFingerprint: HostsReconciliation.canonical(access.content)
-        )
+        let secondResult = try await coordinator.write(secondContent)
         let firstResult = try await firstWrite.value
 
         #expect(access.content == secondContent)
@@ -654,27 +723,17 @@ struct WriteCoordinatorTests {
         let access = DelayedHostsAccess(content: "127.0.0.1 localhost\n")
         let coordinator = HostsWriteCoordinator(access: access, backupDirectory: directory)
 
-        let initialFingerprint = HostsReconciliation.canonical(access.content)
         let first = Task {
-            try await coordinator.write(
-                "127.0.0.1 localhost\n10.0.0.1 a.local\n",
-                expectedCurrentFingerprint: initialFingerprint
-            )
+            try await coordinator.write("127.0.0.1 localhost\n10.0.0.1 a.local\n")
         }
         while !access.started {
             await Task.yield()
         }
         let second = Task {
-            try await coordinator.write(
-                "127.0.0.1 localhost\n10.0.0.2 b.local\n",
-                expectedCurrentFingerprint: initialFingerprint
-            )
+            try await coordinator.write("127.0.0.1 localhost\n10.0.0.2 b.local\n")
         }
         let third = Task {
-            try await coordinator.write(
-                "127.0.0.1 localhost\n10.0.0.3 c.local\n",
-                expectedCurrentFingerprint: initialFingerprint
-            )
+            try await coordinator.write("127.0.0.1 localhost\n10.0.0.3 c.local\n")
         }
         // 让排队中的两次写入真正入队。
         for _ in 0..<4 {
@@ -704,7 +763,7 @@ struct WriteCoordinatorTests {
 
         let first = Task {
             try await coordinator.perform(
-                makeContent: {
+                makeContent: { _ in
                     HostsWriteRequest(content: "127.0.0.1 localhost\n10.0.0.1 first.local\n")
                 },
                 commit: { committed.append($0.content) }
@@ -715,9 +774,12 @@ struct WriteCoordinatorTests {
         }
         let second = Task {
             try await coordinator.perform(
-                makeContent: {
+                makeContent: { liveContent in
                     // Must observe the first operation's commit when it runs.
-                    HostsWriteRequest(content: "127.0.0.1 localhost\n10.0.0.2 \(committed.count).local\n")
+                    #expect(liveContent.contains("first.local"))
+                    return HostsWriteRequest(
+                        content: "127.0.0.1 localhost\n10.0.0.2 \(committed.count).local\n"
+                    )
                 },
                 commit: { committed.append($0.content) }
             )
@@ -741,7 +803,7 @@ struct WriteCoordinatorTests {
 
         do {
             _ = try await coordinator.perform(
-                makeContent: { HostsWriteRequest(content: content) },
+                makeContent: { _ in HostsWriteRequest(content: content) },
                 commit: { _ in throw CommitTestError() }
             )
             Issue.record("Expected a commit error")
@@ -767,7 +829,7 @@ struct WriteCoordinatorTests {
 
         do {
             _ = try await coordinator.perform(
-                makeContent: { HostsWriteRequest(content: first) },
+                makeContent: { _ in HostsWriteRequest(content: first) },
                 commit: { _ in throw CommitTestError() }
             )
             Issue.record("Expected the first commit to fail")
@@ -777,18 +839,18 @@ struct WriteCoordinatorTests {
 
         do {
             _ = try await coordinator.perform(
-                makeContent: { HostsWriteRequest(content: second) },
+                makeContent: { _ in HostsWriteRequest(content: second) },
                 commit: { _ in }
             )
             Issue.record("Expected writes to stay blocked after a failed state commit")
-        } catch is HostsReconciliationRequiredError {
+        } catch is HostsStateRecoveryRequiredError {
             // Expected: the file and the saved model are temporarily divergent.
         }
         #expect(access.content == first)
 
-        coordinator.reconcile(currentContent: first)
+        coordinator.clearStateRecovery()
         let result = try await coordinator.perform(
-            makeContent: { HostsWriteRequest(content: second) },
+            makeContent: { _ in HostsWriteRequest(content: second) },
             commit: { _ in }
         )
         #expect(result.content == second)
@@ -808,7 +870,7 @@ struct WriteCoordinatorTests {
 
         do {
             _ = try await coordinator.perform(
-                makeContent: { throw CommitTestError() },
+                makeContent: { _ in throw CommitTestError() },
                 commit: { _ in }
             )
             Issue.record("Expected content generation to fail")
@@ -817,7 +879,7 @@ struct WriteCoordinatorTests {
         }
 
         let result = try await coordinator.perform(
-            makeContent: { HostsWriteRequest(content: content) },
+            makeContent: { _ in HostsWriteRequest(content: content) },
             commit: { _ in }
         )
         #expect(result.content == content)
@@ -825,76 +887,40 @@ struct WriteCoordinatorTests {
         #expect(!coordinator.isWriting)
     }
 
-    @Test func rejectsWriteWhenFingerprintChangedBeforeQueueHead() async throws {
+    @Test func mergesExternalContentAtQueueHead() async throws {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: directory) }
 
-        let access = InMemoryHostsAccess(content: "127.0.0.1 localhost\n")
+        let access = InMemoryHostsAccess(
+            content: "127.0.0.1 localhost\n10.0.0.9 external.local\n"
+        )
         let coordinator = HostsWriteCoordinator(access: access, backupDirectory: directory)
-        let firstContent = "127.0.0.1 localhost\n10.0.0.1 first.local\n"
-        _ = try await coordinator.write(
-            firstContent,
-            expectedCurrentFingerprint: HostsReconciliation.canonical(access.content)
-        )
 
-        // Simulate an external tool changing the file after the caller captured
-        // the fingerprint. Queue head validation must reject the queued write.
-        let staleFingerprint = HostsReconciliation.canonical(
-            firstContent
-        )
-        access.content = "127.0.0.1 localhost\n10.0.0.9 external.local\n"
-        #expect(staleFingerprint != HostsReconciliation.canonical(access.content))
-        do {
-            _ = try await coordinator.perform(
-                makeContent: {
-                    HostsWriteRequest(
-                        content: "127.0.0.1 localhost\n10.0.0.2 second.local\n",
-                        expectedCurrentFingerprint: staleFingerprint
-                    )
-                },
-                commit: { _ in }
-            )
-            Issue.record("Expected a reconciliation error")
-        } catch is HostsReconciliationRequiredError {
-            // Expected.
-        }
-
-        #expect(!access.content.contains("second.local"))
-    }
-
-    @Test func acceptsFingerprintFromEarlierInternalWrite() async throws {
-        let directory = FileManager.default.temporaryDirectory
-            .appendingPathComponent(UUID().uuidString, isDirectory: true)
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: directory) }
-
-        let access = InMemoryHostsAccess(content: "127.0.0.1 localhost\n")
-        let coordinator = HostsWriteCoordinator(access: access, backupDirectory: directory)
-        let firstContent = "127.0.0.1 localhost\n10.0.0.1 first.local\n"
-        let secondContent = "127.0.0.1 localhost\n10.0.0.2 second.local\n"
-        let staleFingerprint = HostsReconciliation.canonical(access.content)
-
-        _ = try await coordinator.write(
-            firstContent,
-            expectedCurrentFingerprint: HostsReconciliation.canonical(access.content)
-        )
         let result = try await coordinator.perform(
-            makeContent: {
-                HostsWriteRequest(
-                    content: secondContent,
-                    expectedCurrentFingerprint: staleFingerprint
+            makeContent: { liveContent in
+                #expect(liveContent.contains("external.local"))
+                let content = HostsContentMerger.merge(
+                    liveContent: liveContent,
+                    managedEntries: [
+                        ParsedHostEntry(ip: "10.0.0.2", hostnames: ["managed.local"])
+                    ],
+                    ownedHostnames: ["managed.local"]
                 )
+                return HostsWriteRequest(content: content)
             },
             commit: { _ in }
         )
 
-        #expect(result.content == secondContent)
-        #expect(access.content == secondContent)
+        #expect(result.content.contains("external.local"))
+        #expect(
+            HostsReconciliation.canonical(result.content)
+                .contains("10.0.0.2|managed.local")
+        )
     }
 
-    @Test func keepsBlockingUntilExternalContentIsReconciled() async throws {
+    @Test func queuedMergeUsesLatestFileAndRemovesFormerManagedEntries() async throws {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
@@ -902,36 +928,93 @@ struct WriteCoordinatorTests {
 
         let access = InMemoryHostsAccess(content: "127.0.0.1 localhost\n")
         let coordinator = HostsWriteCoordinator(access: access, backupDirectory: directory)
-        let initial = HostsReconciliation.canonical(access.content)
-        access.content = "127.0.0.1 localhost\n10.0.0.9 external.local\n"
-        let external = access.content
+        let firstContent = "127.0.0.1 localhost\n10.0.0.1 first.local\n"
+        _ = try await coordinator.write(firstContent)
 
-        do {
-            _ = try await coordinator.write(
-                "127.0.0.1 localhost\n10.0.0.2 blocked.local\n",
-                expectedCurrentFingerprint: initial
-            )
-            Issue.record("Expected the external edit to be rejected")
-        } catch is HostsReconciliationRequiredError {
-            // Expected.
-        }
+        access.content = """
+        127.0.0.1 localhost
+        10.0.0.1 first.local
+        10.0.0.9 external.local
+        """
 
-        do {
-            _ = try await coordinator.write(
-                "127.0.0.1 localhost\n10.0.0.3 still-blocked.local\n",
-                expectedCurrentFingerprint: HostsReconciliation.canonical(external)
-            )
-            Issue.record("Expected the external edit to stay blocked")
-        } catch is HostsReconciliationRequiredError {
-            // Expected.
-        }
-
-        coordinator.reconcile(currentContent: external)
-        let result = try await coordinator.write(
-            "127.0.0.1 localhost\n10.0.0.4 resolved.local\n",
-            expectedCurrentFingerprint: HostsReconciliation.canonical(external)
+        let result = try await coordinator.perform(
+            makeContent: { liveContent in
+                let merged = HostsContentMerger.merge(
+                    liveContent: liveContent,
+                    managedEntries: [
+                        ParsedHostEntry(ip: "10.0.0.2", hostnames: ["second.local"])
+                    ],
+                    ownedHostnames: ["first.local", "second.local"]
+                )
+                return HostsWriteRequest(content: merged)
+            },
+            commit: { _ in }
         )
-        #expect(result.content.contains("resolved.local"))
+
+        #expect(!result.content.contains("first.local"))
+        #expect(result.content.contains("second.local"))
+        #expect(result.content.contains("external.local"))
+    }
+
+    @Test func explicitOverwriteDoesNotMergeExternalContent() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let access = InMemoryHostsAccess(
+            content: "127.0.0.1 localhost\n10.0.0.9 external.local\n"
+        )
+        let coordinator = HostsWriteCoordinator(access: access, backupDirectory: directory)
+        let restored = "127.0.0.1 localhost\n10.0.0.1 restored.local\n"
+
+        let result = try await coordinator.perform(
+            makeContent: { _ in HostsWriteRequest(content: restored) },
+            commit: { _ in }
+        )
+
+        #expect(result.content == restored)
+        #expect(!access.content.contains("external.local"))
+    }
+
+    @Test func commitFailureBlocksWritesUntilStateRecovery() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let access = InMemoryHostsAccess(content: "127.0.0.1 localhost\n")
+        let coordinator = HostsWriteCoordinator(access: access, backupDirectory: directory)
+
+        do {
+            _ = try await coordinator.perform(
+                makeContent: { _ in
+                    HostsWriteRequest(
+                        content: "127.0.0.1 localhost\n10.0.0.1 failed.local\n",
+                        appliedProfileIDs: []
+                    )
+                },
+                commit: { _ in throw CommitTestError() }
+            )
+            Issue.record("Expected the state commit to fail")
+        } catch is HostsWriteCommitError {
+            // Expected.
+        }
+
+        do {
+            _ = try await coordinator.write(
+                "127.0.0.1 localhost\n10.0.0.2 blocked.local\n"
+            )
+            Issue.record("Expected writes to stay blocked")
+        } catch is HostsStateRecoveryRequiredError {
+            // Expected.
+        }
+
+        coordinator.clearStateRecovery()
+        let result = try await coordinator.write(
+            "127.0.0.1 localhost\n10.0.0.2 recovered.local\n"
+        )
+        #expect(result.content.contains("recovered.local"))
     }
 }
 

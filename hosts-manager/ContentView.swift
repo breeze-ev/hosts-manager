@@ -19,6 +19,7 @@ extension Notification.Name {
 
 enum HostsStateNotificationKey {
     static let appliedProfileIDs = "appliedProfileIDs"
+    static let managedHostnames = "managedHostnames"
     static let skipRealtimeApply = "skipRealtimeApply"
 }
 
@@ -105,9 +106,16 @@ private extension View {
 }
 
 private struct MainWindowBackground: View {
+    let isBlurEnabled: Bool
+
     var body: some View {
-        Rectangle()
-            .fill(.ultraThinMaterial)
+        if isBlurEnabled {
+            Rectangle()
+                .fill(.thinMaterial)
+        } else {
+            Rectangle()
+                .fill(Color(nsColor: .windowBackgroundColor))
+        }
     }
 }
 
@@ -215,11 +223,11 @@ struct ProfileSidebarRow: View {
                         ConfirmPopover(
                             title: l10n.s("停用当前配置？", "Disable the active profile?"),
                             message: l10n.s(
-                                "当前配置会从 /etc/hosts 中移除，操作前会自动备份。",
-                                "The active profile will be removed from /etc/hosts. A backup is created first."
+                                "当前配置管理的条目会从 /etc/hosts 中移除；外部添加的有效条目会保留。操作前会自动备份。",
+                                "Entries managed by this profile will be removed from /etc/hosts; valid external entries are kept. A backup is created first."
                             ),
                             cancelTitle: l10n.s("取消", "Cancel"),
-                            confirmTitle: l10n.s("停用并清除用户条目", "Disable and clear user entries"),
+                            confirmTitle: l10n.s("停用并移除配置条目", "Disable and remove managed entries"),
                             onCancel: { showDisableConfirm = false },
                             onConfirm: {
                                 showDisableConfirm = false
@@ -327,6 +335,7 @@ struct ContentView: View {
     @EnvironmentObject private var l10n: Localization
     @EnvironmentObject private var updateCenter: UpdateCenter
     @AppStorage("appearance") private var appearance = "system"
+    @AppStorage("backgroundBlurEnabled") private var backgroundBlurEnabled = true
 
     @State private var selection: SidebarItem = .profiles
     @State private var selectedProfileID: UUID?
@@ -347,7 +356,7 @@ struct ContentView: View {
     @State private var realtimeApplyRevisions: [UUID: Int] = [:]
     @State private var operationError: String?
     @State private var showHelperGuide = false
-    @State private var showExternalHostsWarning = false
+    @State private var showStateRecoveryWarning = false
     /// The file was written, but the matching Core Data transaction failed.
     /// Keep writes blocked until the user explicitly reconciles the two states.
     @State private var stateCommitFailed = false
@@ -357,12 +366,12 @@ struct ContentView: View {
     @State private var pendingAppliedProfileIDs: [UUID] = []
     /// Distinguishes an empty pending set (valid) from no pending intent.
     @State private var hasPendingAppliedProfileSelection = false
-    /// Canonical fingerprint of the last file content known to be synchronized.
-    /// This distinguishes a normal pending DB edit from an external file edit.
+    /// Canonical fingerprint of the last file content observed at launch or
+    /// successfully written by the app. It is used only for crash recovery.
     @State private var lastKnownHostsFingerprint: String?
-    /// Keep an external-edit warning dismissed until another action explicitly
-    /// asks for reconciliation or the live file changes again.
-    @State private var deferredHostsFingerprint: String?
+    /// Hostnames emitted by the last successful managed write. The union with
+    /// current profiles identifies old rows that must be removed after edits.
+    @State private var managedHostnamesBaseline: Set<String> = []
     /// 每个配置独立防抖，避免编辑 A 后紧接着编辑 B 时取消 A 的落盘任务。
     @State private var realtimeApplyTasks: [UUID: Task<Void, Never>] = [:]
     @State private var pendingScrollProfileID: UUID?
@@ -391,7 +400,7 @@ struct ContentView: View {
             detail
         }
         .containerBackground(for: .window) {
-            MainWindowBackground()
+            MainWindowBackground(isBlurEnabled: backgroundBlurEnabled)
         }
         .navigationTitle("Hosts Manager")
         .toolbar { toolbarContent }
@@ -402,7 +411,7 @@ struct ContentView: View {
                 ApplySheet(
                     profile: profile,
                     draftText: applyDraftText,
-                    expectedCurrentFingerprint: lastKnownHostsFingerprint
+                    managedHostnamesBaseline: managedHostnamesBaseline
                 )
             }
         }
@@ -431,22 +440,22 @@ struct ContentView: View {
             error: $operationError
         ))
         .alert(
-            l10n.s("/etc/hosts 状态需要确认", "/etc/hosts Needs Reconciliation"),
-            isPresented: $showExternalHostsWarning
+            l10n.s("配置状态保存失败", "Profile State Save Failed"),
+            isPresented: $showStateRecoveryWarning
         ) {
-            Button(l10n.s("保留系统文件", "Keep System File")) {
-                keepExternalHostsContent()
+            Button(l10n.s("保留当前系统文件", "Keep Current System File")) {
+                keepCurrentHostsContent()
             }
             Button(l10n.s("重新应用配置", "Reapply Profiles")) {
                 reapplyActiveProfiles()
             }
             Button(l10n.s("稍后处理", "Later"), role: .cancel) {
-                deferCurrentHostsWarning()
+                showStateRecoveryWarning = false
             }
         } message: {
             Text(l10n.s(
-                "当前 /etc/hosts 与已启用配置不一致，可能来自外部修改，或上次写入后状态保存失败。继续编辑会覆盖当前文件；请先选择如何处理。",
-                "The current /etc/hosts no longer matches the applied profiles. This may be from an external edit or a failed state save after writing. Further edits would overwrite the current file; choose how to resolve it first."
+                "/etc/hosts 已写入，但配置开关状态未能保存。为避免文件与数据库继续分叉，后续写入已暂停；请选择如何处理。",
+                "/etc/hosts was written, but the profile switch state could not be saved. Further writes are paused to prevent divergence; choose how to recover."
             ))
         }
         .onAppear {
@@ -479,7 +488,14 @@ struct ContentView: View {
                 let appliedIDs = notification.userInfo?[
                     HostsStateNotificationKey.appliedProfileIDs
                 ] as? [UUID]
-                noteSynchronizedHostsContent(content, appliedProfileIDs: appliedIDs)
+                let managedHostnames = notification.userInfo?[
+                    HostsStateNotificationKey.managedHostnames
+                ] as? [String]
+                noteSynchronizedHostsContent(
+                    content,
+                    appliedProfileIDs: appliedIDs,
+                    managedHostnames: managedHostnames
+                )
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .hostsStateNeedsReconciliation)) { notification in
@@ -492,6 +508,9 @@ struct ContentView: View {
             ] as? [UUID] {
                 pendingAppliedProfileIDs = profileIDs
                 hasPendingAppliedProfileSelection = true
+            }
+            if let managedHostnames = HostsReconciliationBaselineStore.load()?.managedHostnames {
+                managedHostnamesBaseline = Set(managedHostnames)
             }
             persistReconciliationBaseline()
             reconcileSystemHosts()
@@ -536,11 +555,8 @@ struct ContentView: View {
                     ] as? Bool != true else {
                         return
                     }
-                    // A normal DB edit intentionally changes the expected merge,
-                    // so compare against the file only for an external edit that
-                    // happened before this edit was committed.
-                    if realtimeApplyTasks[profileID] == nil && needsHostsReconciliation() {
-                        showExternalHostsWarning = true
+                    if stateCommitFailed {
+                        showStateRecoveryWarning = true
                     } else {
                         scheduleRealtimeApply(for: profile)
                     }
@@ -861,8 +877,8 @@ struct ContentView: View {
     private func requestApply() {
         // 应用操作只属于编辑视图，列表视图里没有应用入口。
         guard mode == .source, selection == .profiles, let profile = selectedProfile else { return }
-        guard !needsHostsReconciliation() else {
-            showExternalHostsWarning = true
+        guard !stateCommitFailed else {
+            showStateRecoveryWarning = true
             return
         }
         applyProfile(profile)
@@ -890,8 +906,29 @@ struct ContentView: View {
         return profiles.filter { $0.id.map(ids.contains) == true }
     }
 
-    private func mergedContent(for profiles: [Profile]) -> String {
-        HostsParser.mergedContent(entries: profiles.flatMap(parsedEntries(for:)))
+    private var configuredHostnames: Set<String> {
+        Set(
+            profiles
+                .filter { !$0.isSystem }
+                .flatMap(\.sortedEntries)
+                .flatMap(\.hostList)
+                .map { $0.lowercased() }
+        )
+    }
+
+    private var ownedHostnames: Set<String> {
+        configuredHostnames.union(managedHostnamesBaseline)
+    }
+
+    private func mergedContent(
+        for profiles: [Profile],
+        liveContent: String
+    ) -> String {
+        HostsContentMerger.merge(
+            liveContent: liveContent,
+            managedEntries: profiles.flatMap(parsedEntries(for:)),
+            ownedHostnames: ownedHostnames
+        )
     }
 
     private func validationIssues(for profiles: [Profile]) -> [HostIssue] {
@@ -908,8 +945,8 @@ struct ContentView: View {
     // 开关的“开”必须等于“已写入系统”，因此新建 / 导入 / 复制的配置默认是关闭的。
     private func enableProfile(_ profile: Profile) {
         guard !profile.isSystem else { return }
-        guard !needsHostsReconciliation() else {
-            showExternalHostsWarning = true
+        guard !stateCommitFailed else {
+            showStateRecoveryWarning = true
             return
         }
         if let profileID = profile.id, sourceDrafts[profileID] != nil {
@@ -936,24 +973,27 @@ struct ContentView: View {
         Task {
             do {
                 var appliedProfileIDs: [UUID] = []
-                let result = try await writeCoordinator.perform(makeContent: {
+                let result = try await writeCoordinator.perform(makeContent: { liveContent in
                     // Re-read active profiles when this operation reaches the
                     // queue head. A preceding queued operation may have changed
                     // the active set since the button was pressed.
-                    guard let current = self.profiles.first(where: {
+                    guard let targetProfile = self.profiles.first(where: {
                         $0.id == profileID && !$0.isDeleted
                     }) else {
                         throw HostsWriteAbortedError()
                     }
-                    let targets = self.activeProfiles.filter { $0.id != profileID } + [current]
+                    let targets = self.activeProfiles.filter { $0.id != profileID } + [targetProfile]
                     if self.hasWriteConflict(in: targets) {
                         throw HostsWriteConflictError(profileID: profileID)
                     }
                     appliedProfileIDs = targets.compactMap(\.id)
                     return HostsWriteRequest(
-                        content: self.mergedContent(for: targets),
-                        expectedCurrentFingerprint: self.lastKnownHostsFingerprint,
-                        appliedProfileIDs: targets.compactMap(\.id)
+                        content: self.mergedContent(
+                            for: targets,
+                            liveContent: liveContent
+                        ),
+                        appliedProfileIDs: targets.compactMap(\.id),
+                        managedHostnames: Array(self.configuredHostnames).sorted()
                     )
                 }, commit: { result in
                     try commitHostsWrite(
@@ -966,7 +1006,8 @@ struct ContentView: View {
                             let finalContent = self.mergedContent(
                                 for: self.profiles.filter {
                                     $0.id.map(appliedProfileIDs.contains) == true
-                                }
+                                },
+                                liveContent: result.content
                             )
                             return HostsReconciliation.canonical(finalContent)
                                 == HostsReconciliation.canonical(result.content)
@@ -1011,15 +1052,15 @@ struct ContentView: View {
 
     private func disableActiveProfile(_ profile: Profile) {
         guard let profileID = profile.id else { return }
-        guard !needsHostsReconciliation() else {
-            showExternalHostsWarning = true
+        guard !stateCommitFailed else {
+            showStateRecoveryWarning = true
             return
         }
         let profileName = profile.localizedName(isEnglish: l10n.isEnglish)
         Task {
             do {
                 var appliedProfileIDs: [UUID] = []
-                let result = try await writeCoordinator.perform(makeContent: {
+                let result = try await writeCoordinator.perform(makeContent: { liveContent in
                     // Only remove this profile; other active profiles stay.
                     let remaining = self.activeProfiles.filter { $0.id != profileID }
                     // The switch may have been turned on while an earlier queued
@@ -1028,9 +1069,12 @@ struct ContentView: View {
                     // earlier write may have applied this profile.
                     appliedProfileIDs = remaining.compactMap(\.id)
                     return HostsWriteRequest(
-                        content: self.mergedContent(for: remaining),
-                        expectedCurrentFingerprint: self.lastKnownHostsFingerprint,
-                        appliedProfileIDs: remaining.compactMap(\.id)
+                        content: self.mergedContent(
+                            for: remaining,
+                            liveContent: liveContent
+                        ),
+                        appliedProfileIDs: remaining.compactMap(\.id),
+                        managedHostnames: Array(self.configuredHostnames).sorted()
                     )
                 }, commit: { result in
                     try commitHostsWrite(
@@ -1043,7 +1087,8 @@ struct ContentView: View {
                             let finalContent = self.mergedContent(
                                 for: self.profiles.filter {
                                     $0.id.map(appliedProfileIDs.contains) == true
-                                }
+                                },
+                                liveContent: result.content
                             )
                             return HostsReconciliation.canonical(finalContent)
                                 == HostsReconciliation.canonical(result.content)
@@ -1072,9 +1117,6 @@ struct ContentView: View {
         guard let profileID = profile.id else { return }
         let revision = realtimeApplyRevisions[profileID, default: 0] + 1
         realtimeApplyRevisions[profileID] = revision
-        // Capture the baseline before the debounce. If an external tool changes
-        // the file during the delay, queue-head validation must reject it.
-        let expectedFingerprint = lastKnownHostsFingerprint
         let existing = realtimeApplyTasks[profileID]
         realtimeApplyTasks[profileID] = Task { @MainActor in
             defer {
@@ -1102,22 +1144,16 @@ struct ContentView: View {
                   !current.isDeleted else {
                 return
             }
-            guard !needsHostsReconciliation() else {
-                showExternalHostsWarning = true
+            guard !stateCommitFailed else {
+                showStateRecoveryWarning = true
                 return
             }
             realtimeApplyTasks.removeValue(forKey: profileID)
-            applyActiveProfilesToSystem(
-                for: current,
-                expectedFingerprint: expectedFingerprint
-            )
+            applyActiveProfilesToSystem(for: current)
         }
     }
 
-    private func applyActiveProfilesToSystem(
-        for profile: Profile,
-        expectedFingerprint: String?
-    ) {
+    private func applyActiveProfilesToSystem(for profile: Profile) {
         // 开关打开才代表“该配置属于系统内容”。关闭的配置列表编辑后只改库，
         // 不会被静默带进 /etc/hosts。
         guard !profile.isSystem else { return }
@@ -1127,7 +1163,7 @@ struct ContentView: View {
         Task {
             do {
                 var appliedProfileIDs: [UUID] = []
-                let result = try await writeCoordinator.perform(makeContent: {
+                let result = try await writeCoordinator.perform(makeContent: { liveContent in
                     // A restore or another queued operation may have disabled
                     // this profile after the debounce fired. Re-check at the
                     // queue head so a stale task cannot undo that state.
@@ -1142,9 +1178,12 @@ struct ContentView: View {
                     }
                     appliedProfileIDs = targets.compactMap(\.id)
                     return HostsWriteRequest(
-                        content: self.mergedContent(for: targets),
-                        expectedCurrentFingerprint: expectedFingerprint,
-                        appliedProfileIDs: targets.compactMap(\.id)
+                        content: self.mergedContent(
+                            for: targets,
+                            liveContent: liveContent
+                        ),
+                        appliedProfileIDs: targets.compactMap(\.id),
+                        managedHostnames: Array(self.configuredHostnames).sorted()
                     )
                 }, commit: { result in
                     try commitHostsWrite(
@@ -1157,7 +1196,8 @@ struct ContentView: View {
                             let finalContent = self.mergedContent(
                                 for: self.profiles.filter {
                                     $0.id.map(appliedProfileIDs.contains) == true
-                                }
+                                },
+                                liveContent: result.content
                             )
                             return HostsReconciliation.canonical(finalContent)
                                 == HostsReconciliation.canonical(result.content)
@@ -1181,81 +1221,37 @@ struct ContentView: View {
     }
 
     private func reconcileSystemHosts() {
-        let liveContent = try? HostsWriter.readContent()
-        let liveFingerprint = liveContent.map(HostsReconciliation.canonical)
-        if deferredHostsFingerprint != liveFingerprint {
-            deferredHostsFingerprint = nil
-        }
-        showExternalHostsWarning = needsHostsReconciliation(liveContent: liveContent)
-            && deferredHostsFingerprint == nil
+        showStateRecoveryWarning = stateCommitFailed
     }
 
     private func reconcileOnLaunch() {
         if lastKnownHostsFingerprint == nil {
             loadPersistedReconciliationBaseline()
         }
-        let liveContent = try? HostsWriter.readContent()
         if let baseline = HostsReconciliationBaselineStore.load(),
-           let recovery = HostsRecoveryPlanner.resolve(
-               baseline: baseline,
-               liveContent: liveContent
-           ) {
-            if recovery == .keepSystemFile {
-                stateCommitFailed = false
-                pendingAppliedProfileIDs = []
-                hasPendingAppliedProfileSelection = false
-            } else {
-                stateCommitFailed = true
-                pendingAppliedProfileIDs = recovery.appliedProfileIDs
-                hasPendingAppliedProfileSelection = true
-            }
-        }
-        if lastKnownHostsFingerprint == nil {
-            initializeReconciliationBaseline()
-        }
-        reconcileSystemHosts()
-    }
-
-    private func initializeReconciliationBaseline() {
-        let liveContent = try? HostsWriter.readContent()
-        let persistedIDs = activeProfiles.compactMap(\.id)
-        let expectedContent = mergedContent(for: activeProfiles)
-        switch HostsReconciliation.inspect(
-            liveContent: liveContent,
-            expectedContent: expectedContent,
-            hasActiveProfiles: !persistedIDs.isEmpty
-        ) {
-        case .inSync:
-            // The live file proves the persisted applied set is correct.
-            lastKnownHostsFingerprint = liveContent.map(HostsReconciliation.canonical)
-            if let liveContent {
-                writeCoordinator.reconcile(currentContent: liveContent)
-            }
-            persistReconciliationBaseline()
-            showExternalHostsWarning = false
-        case .externalContent:
-            // Do not bless an unknown file. The user must either keep it or
-            // explicitly replace it with the persisted applied set.
-            lastKnownHostsFingerprint = nil
+           let recovery = HostsRecoveryPlanner.resolve(baseline: baseline) {
+            stateCommitFailed = true
+            pendingAppliedProfileIDs = recovery.appliedProfileIDs
+            hasPendingAppliedProfileSelection = true
+        } else {
             stateCommitFailed = false
             pendingAppliedProfileIDs = []
             hasPendingAppliedProfileSelection = false
-            HostsReconciliationBaselineStore.clear()
-            showExternalHostsWarning = true
-        case .noActiveProfiles:
-            // With no active profiles the file is intentionally unmanaged, but
-            // remember its current contents so later edits can detect changes.
-            lastKnownHostsFingerprint = liveContent.map(HostsReconciliation.canonical)
-            if let liveContent {
-                writeCoordinator.reconcile(currentContent: liveContent)
-            }
-            persistReconciliationBaseline()
-            showExternalHostsWarning = false
-        case .unreadable:
-            lastKnownHostsFingerprint = nil
-            persistReconciliationBaseline()
-            showExternalHostsWarning = false
         }
+        if managedHostnamesBaseline.isEmpty {
+            managedHostnamesBaseline = configuredHostnames
+        }
+        refreshReconciliationBaselineFromLiveFile()
+    }
+
+    private func refreshReconciliationBaselineFromLiveFile() {
+        if let liveContent = try? HostsWriter.readContent() {
+            lastKnownHostsFingerprint = HostsReconciliation.canonical(liveContent)
+            persistReconciliationBaseline()
+        } else if lastKnownHostsFingerprint == nil {
+            HostsReconciliationBaselineStore.clear()
+        }
+        reconcileSystemHosts()
     }
 
     private func loadPersistedReconciliationBaseline() {
@@ -1263,6 +1259,7 @@ struct ContentView: View {
             return
         }
         lastKnownHostsFingerprint = baseline.fingerprint
+        managedHostnamesBaseline = Set(baseline.managedHostnames)
         stateCommitFailed = baseline.stateCommitFailed
         if let pending = baseline.pendingAppliedProfileIDs {
             pendingAppliedProfileIDs = pending
@@ -1270,10 +1267,6 @@ struct ContentView: View {
         } else if baseline.stateCommitFailed {
             pendingAppliedProfileIDs = baseline.appliedProfileIDs
             hasPendingAppliedProfileSelection = true
-        }
-        let liveContent = try? HostsWriter.readContent()
-        if let liveContent {
-            writeCoordinator.reconcile(currentContent: liveContent)
         }
     }
 
@@ -1289,39 +1282,15 @@ struct ContentView: View {
                 pendingAppliedProfileIDs: hasPendingAppliedProfileSelection
                     ? pendingAppliedProfileIDs
                     : nil,
+                managedHostnames: managedHostnamesBaseline.sorted(),
                 stateCommitFailed: stateCommitFailed
             )
         )
     }
 
-    private func deferCurrentHostsWarning() {
-        deferredHostsFingerprint = (try? HostsWriter.readContent())
-            .map(HostsReconciliation.canonical)
-    }
-
-    private func needsHostsReconciliation(liveContent: String? = nil) -> Bool {
-        if stateCommitFailed {
-            return true
-        }
-        let content: String?
-        if let liveContent {
-            content = liveContent
-        } else {
-            content = try? HostsWriter.readContent()
-        }
-        guard let content else {
-            return false
-        }
-        return HostsReconciliation.requiresReconciliation(
-            liveContent: content,
-            lastKnownFingerprint: lastKnownHostsFingerprint,
-            stateCommitFailed: stateCommitFailed
-        )
-    }
-
-    /// Keep the externally edited file and stop claiming that cached profiles
-    /// are currently represented in it.
-    private func keepExternalHostsContent() {
+    /// Resolve a failed state commit by keeping the file and clearing applied
+    /// profile switches in Core Data.
+    private func keepCurrentHostsContent() {
         let liveContent = try? HostsWriter.readContent()
         let liveFingerprint = liveContent.map(HostsReconciliation.canonical)
         let previousFingerprint = lastKnownHostsFingerprint
@@ -1341,29 +1310,18 @@ struct ContentView: View {
             persistReconciliationBaseline()
             return
         }
-        if let liveContent {
-            writeCoordinator.reconcile(currentContent: liveContent)
-        }
+        writeCoordinator.clearStateRecovery()
         lastKnownHostsFingerprint = liveFingerprint
         pendingAppliedProfileIDs = []
         hasPendingAppliedProfileSelection = false
         stateCommitFailed = false
-        deferredHostsFingerprint = nil
-        showExternalHostsWarning = false
+        showStateRecoveryWarning = false
         persistReconciliationBaseline()
         NotificationCenter.default.post(name: .hostsStateReconciled, object: nil)
     }
 
-    /// Explicit user choice: overwrite the externally edited file with the
-    /// current applied-profile merge.
+    /// Resolve a failed state commit by applying the pending profile selection.
     private func reapplyActiveProfiles() {
-        // The alert is an explicit overwrite choice. Snapshot the live file now
-        // so queued writes still reject an edit that happens after the choice.
-        // A stale/missing cached baseline must not turn this choice into an
-        // unguarded overwrite or a repeated reconciliation alert.
-        let expectedFingerprint = (try? HostsWriter.readContent()).map(
-            HostsReconciliation.canonical
-        )
         let targetIDs = stateCommitFailed && hasPendingAppliedProfileSelection
             ? pendingAppliedProfileIDs
             : activeProfiles.compactMap(\.id)
@@ -1381,17 +1339,13 @@ struct ContentView: View {
             selection = .profiles
             selectedProfileID = first?.id
             applyDraftText = nil
+            writeCoordinator.clearStateRecovery()
             showApply = true
-            showExternalHostsWarning = false
+            showStateRecoveryWarning = false
             return
         }
-        showExternalHostsWarning = false
-        // Reapply is the explicit unblock action. Without this, a coordinator
-        // left blocked by an external edit rejects the very write that is
-        // meant to resolve the alert, so the same warning reappears.
-        if let liveContent = try? HostsWriter.readContent() {
-            writeCoordinator.reconcile(currentContent: liveContent)
-        }
+        showStateRecoveryWarning = false
+        writeCoordinator.clearStateRecovery()
         if targetIDs.isEmpty {
             writeEmptyAppliedSelection()
             return
@@ -1399,7 +1353,7 @@ struct ContentView: View {
         Task {
             do {
                 var appliedProfileIDs: [UUID] = []
-                let result = try await writeCoordinator.perform(makeContent: {
+                let result = try await writeCoordinator.perform(makeContent: { liveContent in
                     let targets = self.profiles.filter { profile in
                         profile.id.map(targetIDs.contains) == true
                     }
@@ -1409,9 +1363,12 @@ struct ContentView: View {
                     }
                     appliedProfileIDs = targets.compactMap(\.id)
                     return HostsWriteRequest(
-                        content: self.mergedContent(for: targets),
-                        expectedCurrentFingerprint: expectedFingerprint,
-                        appliedProfileIDs: targets.compactMap(\.id)
+                        content: self.mergedContent(
+                            for: targets,
+                            liveContent: liveContent
+                        ),
+                        appliedProfileIDs: targets.compactMap(\.id),
+                        managedHostnames: Array(self.configuredHostnames).sorted()
                     )
                 }, commit: { result in
                     try commitHostsWrite(
@@ -1424,7 +1381,8 @@ struct ContentView: View {
                             let finalContent = self.mergedContent(
                                 for: self.profiles.filter {
                                     $0.id.map(appliedProfileIDs.contains) == true
-                                }
+                                },
+                                liveContent: result.content
                             )
                             return HostsReconciliation.canonical(finalContent)
                                 == HostsReconciliation.canonical(result.content)
@@ -1447,18 +1405,18 @@ struct ContentView: View {
     }
 
     private func writeEmptyAppliedSelection() {
-        let expectedFingerprint = (try? HostsWriter.readContent()).map(
-            HostsReconciliation.canonical
-        )
         Task {
             do {
                 var appliedProfileIDs: [UUID] = []
-                let result = try await writeCoordinator.perform(makeContent: {
+                let result = try await writeCoordinator.perform(makeContent: { liveContent in
                     appliedProfileIDs = []
                     return HostsWriteRequest(
-                        content: self.mergedContent(for: []),
-                        expectedCurrentFingerprint: expectedFingerprint,
-                        appliedProfileIDs: []
+                        content: self.mergedContent(
+                            for: [],
+                            liveContent: liveContent
+                        ),
+                        appliedProfileIDs: [],
+                        managedHostnames: Array(self.configuredHostnames).sorted()
                     )
                 }, commit: { result in
                     try commitHostsWrite(
@@ -1486,20 +1444,22 @@ struct ContentView: View {
 
     private func noteSynchronizedHostsContent(
         _ content: String,
-        appliedProfileIDs: [UUID]? = nil
+        appliedProfileIDs: [UUID]? = nil,
+        managedHostnames: [String]? = nil
     ) {
         lastKnownHostsFingerprint = HostsReconciliation.canonical(content)
+        managedHostnamesBaseline = managedHostnames.map { Set($0) } ?? configuredHostnames
         stateCommitFailed = false
         pendingAppliedProfileIDs = []
         hasPendingAppliedProfileSelection = false
-        deferredHostsFingerprint = nil
-        showExternalHostsWarning = false
+        showStateRecoveryWarning = false
         if let appliedProfileIDs {
             HostsReconciliationBaselineStore.save(
                 HostsReconciliationBaseline(
                     fingerprint: HostsReconciliation.canonical(content),
                     appliedProfileIDs: appliedProfileIDs,
                     pendingAppliedProfileIDs: nil,
+                    managedHostnames: managedHostnamesBaseline.sorted(),
                     stateCommitFailed: false
                 )
             )
@@ -1703,18 +1663,14 @@ struct ContentView: View {
     }
 
     private func handleWriteFailure(_ error: Error, profileID: UUID?) {
-        if error is HostsReconciliationRequiredError {
-            deferredHostsFingerprint = nil
-            reconcileSystemHosts()
+        if error is HostsStateRecoveryRequiredError {
+            showStateRecoveryWarning = true
             return
         }
         if error is HostsWriteStateReconciliationError {
             stateCommitFailed = true
             persistReconciliationBaseline()
-            operationError = l10n.s(
-                "/etc/hosts 已写入，但配置状态未能完整同步。请选择“重新应用配置”完成同步。",
-                "/etc/hosts was written, but the profile state is not fully synchronized. Choose “Reapply Profiles” to finish."
-            )
+            showStateRecoveryWarning = true
             return
         }
         if let conflict = error as? HostsWriteConflictError {
@@ -1729,33 +1685,33 @@ struct ContentView: View {
         if error is HostsWriteAbortedError {
             return
         }
-        if let commitError = error as? HostsWriteCommitError {
+        if error is HostsWriteCommitError {
             stateCommitFailed = true
             hasPendingAppliedProfileSelection = true
+            if let managedHostnames = HostsReconciliationBaselineStore.load()?.managedHostnames {
+                managedHostnamesBaseline = Set(managedHostnames)
+            }
             if let content = try? HostsWriter.readContent() {
                 lastKnownHostsFingerprint = HostsReconciliation.canonical(content)
             }
             persistReconciliationBaseline()
-            operationError = l10n.s(
-                "/etc/hosts 已写入，但配置状态保存失败。请检查磁盘空间后重试同步。\n\(commitError.underlying.localizedDescription)",
-                "/etc/hosts was written, but the profile state could not be saved. Check available disk space and resync.\n\(commitError.underlying.localizedDescription)"
-            )
+            showStateRecoveryWarning = true
             return
         }
         operationError = localizedError(error)
     }
 
     private func localizedError(_ error: Error) -> String {
-        if error is HostsReconciliationRequiredError {
+        if error is HostsStateRecoveryRequiredError {
             return l10n.s(
-                "请先处理 /etc/hosts 与配置状态的不一致。",
-                "Resolve the mismatch between /etc/hosts and the profile state first."
+                "配置状态尚未恢复，写入已暂停。",
+                "Profile state recovery is pending; writes are paused."
             )
         }
         if error is HostsWriteStateReconciliationError {
             return l10n.s(
-                "/etc/hosts 已写入，但配置状态未能完整同步。请先重新对账。",
-                "/etc/hosts was written, but the profile state is not fully synchronized. Reconcile the state first."
+                "/etc/hosts 已写入，但配置状态未能完整同步。请先恢复配置状态。",
+                "/etc/hosts was written, but the profile state is not fully synchronized. Recover the profile state first."
             )
         }
         if error is HostsWriteConflictError {
@@ -3308,14 +3264,14 @@ struct BackupsView: View {
             let coordinator = writeCoordinator
             do {
                 _ = try await coordinator.perform(
-                    makeContent: {
+                    makeContent: { _ in
                         // Restoring a backup is an explicit overwrite. Queue-head
                         // serialization still ensures it runs after any earlier
                         // committed operation.
                         HostsWriteRequest(
                             content: content,
-                            expectedCurrentFingerprint: nil,
-                            appliedProfileIDs: []
+                            appliedProfileIDs: [],
+                            managedHostnames: []
                         )
                     },
                     commit: { result in
@@ -3335,7 +3291,7 @@ struct BackupsView: View {
                     }
                 )
                 await MainActor.run {
-                    writeCoordinator.reconcile(currentContent: content)
+                    writeCoordinator.clearStateRecovery()
                     NotificationCenter.default.post(name: .hostsStateReconciled, object: nil)
                     restoreMessage = l10n.s(
                         "已还原备份。原已启用配置均已标记为未应用，需要时可重新打开对应开关。",
@@ -3348,13 +3304,14 @@ struct BackupsView: View {
                         // The file already contains the backup and all previous
                         // profiles are intended to be unapplied. Pose the exact
                         // empty selection so recovery cannot reapply stale ids.
-                        coordinator.requiresReconciliationAfterStateCommitFailure(
+                        coordinator.requiresStateRecoveryAfterCommitFailure(
                             content: commitError.result.content,
-                            appliedProfileIDs: []
+                            appliedProfileIDs: [],
+                            managedHostnames: []
                         )
                         restoreMessage = l10n.s(
-                            "/etc/hosts 已还原，但配置开关状态未能清理。请选择“保留系统文件”完成对账。\n\(commitError.underlying.localizedDescription)",
-                            "/etc/hosts was restored, but the profile switches could not be cleared. Choose “Keep System File” to finish reconciliation.\n\(commitError.underlying.localizedDescription)"
+                            "/etc/hosts 已还原，但配置开关状态未能清理。请选择“保留当前系统文件”完成恢复。\n\(commitError.underlying.localizedDescription)",
+                            "/etc/hosts was restored, but the profile switches could not be cleared. Choose “Keep Current System File” to finish recovery.\n\(commitError.underlying.localizedDescription)"
                         )
                         NotificationCenter.default.post(name: .hostsStateReconciled, object: nil)
                     } else {
@@ -3597,6 +3554,7 @@ struct SettingsView: View {
     @EnvironmentObject private var l10n: Localization
     @EnvironmentObject private var updateCenter: UpdateCenter
     @AppStorage("appearance") private var appearance = "system"
+    @AppStorage("backgroundBlurEnabled") private var backgroundBlurEnabled = true
     @State private var retention = 30
     @State private var defaultView = EntryMode.list.rawValue
     @State private var helperStatus = ""
@@ -3644,6 +3602,11 @@ struct SettingsView: View {
                     }
                     .labelsHidden()
                     .pickerStyle(.segmented)
+                }
+                Divider()
+                SettingsRow(label: l10n.s("背景", "Background")) {
+                    Toggle(l10n.s("背景模糊", "Background blur"), isOn: $backgroundBlurEnabled)
+                        .toggleStyle(.switch)
                 }
             }
             .frame(maxWidth: .infinity)
@@ -3834,7 +3797,7 @@ struct SettingsRow<Content: View>: View {
 struct ApplySheet: View {
     @ObservedObject var profile: Profile
     let draftText: String?
-    let expectedCurrentFingerprint: String?
+    let managedHostnamesBaseline: Set<String>
     @Environment(\.managedObjectContext) private var context
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject private var l10n: Localization
@@ -3850,11 +3813,11 @@ struct ApplySheet: View {
     init(
         profile: Profile,
         draftText: String? = nil,
-        expectedCurrentFingerprint: String? = nil
+        managedHostnamesBaseline: Set<String> = []
     ) {
         self.profile = profile
         self.draftText = draftText
-        self.expectedCurrentFingerprint = expectedCurrentFingerprint
+        self.managedHostnamesBaseline = managedHostnamesBaseline
     }
 
     var body: some View {
@@ -3885,7 +3848,43 @@ struct ApplySheet: View {
     }
 
     private var target: String {
-        HostsParser.mergedContent(entries: parsed)
+        mergedContent(entries: parsed, liveContent: HostsWriter.currentContent())
+    }
+
+    private var ownedHostnames: Set<String> {
+        Set(
+            allProfiles
+                .filter { !$0.isSystem }
+                .flatMap(\.sortedEntries)
+                .flatMap(\.hostList)
+                .map { $0.lowercased() }
+        ).union(managedHostnamesBaseline)
+    }
+
+    private var managedHostnamesAfterWrite: Set<String> {
+        let otherHostnames = allProfiles
+            .filter {
+                !$0.isSystem && $0.objectID != profile.objectID
+            }
+            .flatMap(\.sortedEntries)
+            .flatMap(\.hostList)
+        let targetHostnames = draftText.map {
+            HostsParser.parse($0).flatMap(\.hostnames)
+        } ?? profile.sortedEntries.flatMap(\.hostList)
+        return Set(
+            (otherHostnames + targetHostnames).map { $0.lowercased() }
+        )
+    }
+
+    private func mergedContent(
+        entries: [ParsedHostEntry],
+        liveContent: String
+    ) -> String {
+        HostsContentMerger.merge(
+            liveContent: liveContent,
+            managedEntries: entries,
+            ownedHostnames: ownedHostnames
+        )
     }
 
     private var exactDuplicateObjectIDs: Set<NSManagedObjectID> {
@@ -4214,7 +4213,7 @@ struct ApplySheet: View {
                 var appliedProfileIDs: [UUID] = []
                 let draftEntries = draftText.map { HostsParser.parse($0) }
                 _ = try await writeCoordinator.perform(
-                    makeContent: {
+                    makeContent: { liveContent in
                         // Re-read at the queue head so a profile applied or
                         // disabled while this sheet was open cannot be omitted.
                         guard !self.profile.isDeleted, !self.profile.isSystem else {
@@ -4232,9 +4231,14 @@ struct ApplySheet: View {
                         }
                         appliedProfileIDs = targets.compactMap(\.id)
                         return HostsWriteRequest(
-                            content: HostsParser.mergedContent(entries: entries),
-                            expectedCurrentFingerprint: expectedCurrentFingerprint,
-                            appliedProfileIDs: targets.compactMap(\.id)
+                            content: self.mergedContent(
+                                entries: entries,
+                                liveContent: liveContent
+                            ),
+                            appliedProfileIDs: targets.compactMap(\.id),
+                            managedHostnames: Array(
+                                self.managedHostnamesAfterWrite
+                            ).sorted()
                         )
                     },
                     commit: { result in

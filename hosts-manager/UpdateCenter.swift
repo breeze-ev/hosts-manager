@@ -379,14 +379,293 @@ nonisolated enum UpdateFileNaming {
 }
 
 nonisolated enum ReleaseNotesFormatter {
-    static func attributedString(
-        from markdown: String,
-        baseURL: URL
-    ) -> AttributedString {
+    static func blocks(from markdown: String, baseURL: URL) -> [ReleaseNotesBlock] {
+        var parser = ReleaseNotesBlockParser(
+            lines: markdown.components(separatedBy: .newlines),
+            baseURL: baseURL
+        )
+        return parser.parseBlocks()
+    }
+}
+
+nonisolated enum ReleaseNotesBlock: Equatable {
+    case paragraph(AttributedString)
+    case heading(level: Int, content: AttributedString)
+    case list(ordered: Bool, start: Int, items: [ReleaseNotesListItem])
+    case blockquote(blocks: [ReleaseNotesBlock])
+    case code(language: String?, content: String)
+    case thematicBreak
+}
+
+nonisolated struct ReleaseNotesListItem: Equatable {
+    let blocks: [ReleaseNotesBlock]
+}
+
+nonisolated private struct ReleaseNotesBlockParser {
+    private var lines: [String]
+    private var index = 0
+    private let baseURL: URL
+
+    init(lines: [String], baseURL: URL) {
+        self.lines = lines
+        self.baseURL = baseURL
+    }
+
+    mutating func parseBlocks() -> [ReleaseNotesBlock] {
+        var blocks: [ReleaseNotesBlock] = []
+
+        while index < lines.count {
+            let line = lines[index]
+            if line.trimmingCharacters(in: .whitespaces).isEmpty {
+                index += 1
+                continue
+            }
+            if let block = parseFencedCode() {
+                blocks.append(block)
+            } else if let heading = parseHeading() {
+                blocks.append(heading)
+            } else if isThematicBreak(line) {
+                index += 1
+                blocks.append(.thematicBreak)
+            } else if let list = parseList() {
+                blocks.append(list)
+            } else if let quote = parseBlockquote() {
+                blocks.append(quote)
+            } else {
+                blocks.append(parseParagraph())
+            }
+        }
+
+        return blocks
+    }
+
+    private func inline(_ markdown: String) -> AttributedString {
         var options = AttributedString.MarkdownParsingOptions()
         options.interpretedSyntax = .inlineOnlyPreservingWhitespace
-        return (try? AttributedString(markdown: markdown, options: options, baseURL: baseURL))
-            ?? AttributedString(markdown)
+        return (try? AttributedString(
+            markdown: markdown,
+            options: options,
+            baseURL: baseURL
+        )) ?? AttributedString(markdown)
+    }
+
+    private mutating func parseFencedCode() -> ReleaseNotesBlock? {
+        let trimmed = lines[index].trimmingCharacters(in: .whitespaces)
+        guard trimmed.count >= 3,
+              let fenceCharacter = trimmed.first,
+              fenceCharacter == "`" || fenceCharacter == "~",
+              trimmed.allSatisfy({ $0 == fenceCharacter }) else {
+            return nil
+        }
+
+        let fenceLength = trimmed.prefix(while: { $0 == fenceCharacter }).count
+        guard fenceLength >= 3 else { return nil }
+        let language = String(trimmed.dropFirst(fenceLength))
+            .trimmingCharacters(in: .whitespaces)
+        index += 1
+
+        var content: [String] = []
+        while index < lines.count {
+            let closingLine = lines[index].trimmingCharacters(in: .whitespaces)
+            if closingLine.count >= fenceLength,
+               closingLine.prefix(fenceLength).allSatisfy({ $0 == fenceCharacter }),
+               closingLine.trimmingCharacters(in: .whitespaces) == String(repeating: fenceCharacter, count: fenceLength) {
+                index += 1
+                return .code(
+                    language: language.isEmpty ? nil : language,
+                    content: content.joined(separator: "\n")
+                )
+            }
+            content.append(lines[index])
+            index += 1
+        }
+
+        return .code(language: language.isEmpty ? nil : language, content: content.joined(separator: "\n"))
+    }
+
+    private mutating func parseHeading() -> ReleaseNotesBlock? {
+        let trimmed = lines[index].trimmingCharacters(in: .whitespaces)
+        let level = trimmed.prefix(while: { $0 == "#" }).count
+        guard (1...6).contains(level),
+              trimmed.count > level,
+              trimmed[trimmed.index(trimmed.startIndex, offsetBy: level)] == " " else {
+            return nil
+        }
+
+        index += 1
+        let content = String(trimmed.dropFirst(level + 1))
+        return .heading(level: level, content: inline(content))
+    }
+
+    private func isThematicBreak(_ line: String) -> Bool {
+        let compact = line.replacingOccurrences(of: " ", with: "")
+        return !compact.isEmpty && compact.count >= 3
+            && (compact.allSatisfy({ $0 == "-" }) || compact.allSatisfy({ $0 == "*" }) || compact.allSatisfy({ $0 == "_" }))
+    }
+
+    private mutating func parseList() -> ReleaseNotesBlock? {
+        guard let first = listItemMarker(in: lines[index]) else { return nil }
+        var ordered = first.ordered
+        var start = first.number
+        var items: [ReleaseNotesListItem] = []
+
+        while index < lines.count {
+            guard let marker = listItemMarker(in: lines[index]) else { break }
+            if items.isEmpty {
+                ordered = marker.ordered
+                start = marker.number
+            }
+
+            var itemLines = [marker.content]
+            index += 1
+            while index < lines.count,
+                  !lines[index].trimmingCharacters(in: .whitespaces).isEmpty,
+                  listItemMarker(in: lines[index]) == nil {
+                itemLines.append(lines[index].trimmingCharacters(in: .whitespaces))
+                index += 1
+            }
+
+            var child = ReleaseNotesBlockParser(lines: itemLines, baseURL: baseURL)
+            items.append(ReleaseNotesListItem(blocks: child.parseBlocks()))
+        }
+
+        return .list(ordered: ordered, start: start, items: items)
+    }
+
+    private mutating func parseBlockquote() -> ReleaseNotesBlock? {
+        guard lines[index].trimmingCharacters(in: .whitespaces).hasPrefix(">") else { return nil }
+        var content: [String] = []
+
+        while index < lines.count {
+            let trimmed = lines[index].trimmingCharacters(in: .whitespaces)
+            guard trimmed.hasPrefix(">") else { break }
+            content.append(String(String(trimmed.dropFirst()).drop(while: { $0 == " " })))
+            index += 1
+        }
+
+        var child = ReleaseNotesBlockParser(lines: content, baseURL: baseURL)
+        return .blockquote(blocks: child.parseBlocks())
+    }
+
+    private mutating func parseParagraph() -> ReleaseNotesBlock {
+        var paragraph: [String] = []
+        while index < lines.count,
+              !lines[index].trimmingCharacters(in: .whitespaces).isEmpty,
+              !isThematicBreak(lines[index]),
+              listItemMarker(in: lines[index]) == nil,
+              !lines[index].trimmingCharacters(in: .whitespaces).hasPrefix(">"),
+              !lines[index].trimmingCharacters(in: .whitespaces).hasPrefix("```") {
+            paragraph.append(lines[index])
+            index += 1
+        }
+
+        return .paragraph(inline(paragraph.joined(separator: "\n")))
+    }
+
+    private func listItemMarker(in line: String) -> (ordered: Bool, number: Int, content: String)? {
+        let trimmed = line.trimmingCharacters(in: .whitespaces)
+        if let first = trimmed.first,
+           first == "-" || first == "*" || first == "+",
+           trimmed.count > 1,
+           trimmed[trimmed.index(after: trimmed.startIndex)] == " " {
+            let remainder = String(trimmed.dropFirst()).drop(while: { $0 == " " })
+            guard !remainder.isEmpty else { return nil }
+            return (false, 1, String(remainder))
+        }
+
+        let digits = trimmed.prefix(while: \.isNumber)
+        guard digits.count >= 1, digits.count <= 9,
+              trimmed.count > digits.count,
+              trimmed[trimmed.index(trimmed.startIndex, offsetBy: digits.count)] == "."
+                  || trimmed[trimmed.index(trimmed.startIndex, offsetBy: digits.count)] == ")",
+              trimmed.count > digits.count + 1,
+              trimmed[trimmed.index(trimmed.startIndex, offsetBy: digits.count + 1)] == " " else {
+            return nil
+        }
+        let remainder = String(trimmed.dropFirst(digits.count + 1)).drop(while: { $0 == " " })
+        guard !remainder.isEmpty, let number = Int(digits) else { return nil }
+        return (true, number, String(remainder))
+    }
+}
+
+nonisolated private struct ReleaseNotesView: View {
+    let markdown: String
+    let baseURL: URL
+
+    var body: some View {
+        let blocks = ReleaseNotesFormatter.blocks(from: markdown, baseURL: baseURL)
+        VStack(alignment: .leading, spacing: 10) {
+            ForEach(Array(blocks.enumerated()), id: \.offset) { _, block in
+                releaseBlock(block)
+            }
+        }
+    }
+
+    private func releaseBlock(_ block: ReleaseNotesBlock) -> AnyView {
+        switch block {
+        case .paragraph(let content):
+            AnyView(
+                Text(content)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            )
+        case .heading(let level, let content):
+            AnyView(headingText(level: level, content: content))
+        case .list(let ordered, let start, let items):
+            AnyView(
+                VStack(alignment: .leading, spacing: 6) {
+                    ForEach(Array(items.enumerated()), id: \.offset) { offset, item in
+                        HStack(alignment: .firstTextBaseline, spacing: 7) {
+                            Text(ordered ? "\(start + offset)." : "-")
+                                .monospacedDigit()
+                                .foregroundStyle(.secondary)
+                            VStack(alignment: .leading, spacing: 6) {
+                                ForEach(Array(item.blocks.enumerated()), id: \.offset) { _, child in
+                                    releaseBlock(child)
+                                }
+                            }
+                        }
+                    }
+                }
+            )
+        case .blockquote(let blocks):
+            AnyView(
+                HStack(alignment: .top, spacing: 10) {
+                    Rectangle()
+                        .fill(Color.accentColor.opacity(0.35))
+                        .frame(width: 3)
+                    VStack(alignment: .leading, spacing: 8) {
+                        ForEach(Array(blocks.enumerated()), id: \.offset) { _, child in
+                            releaseBlock(child)
+                        }
+                    }
+                }
+            )
+        case .code(_, let content):
+            AnyView(
+                Text(content)
+                    .font(.system(size: 12, design: .monospaced))
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(10)
+                    .background(RoundedRectangle(cornerRadius: 8).fill(Color.primary.opacity(0.06)))
+            )
+        case .thematicBreak:
+            AnyView(Divider())
+        }
+    }
+
+    private func headingText(level: Int, content: AttributedString) -> some View {
+        let size: CGFloat = switch level {
+        case 1: 20
+        case 2: 18
+        case 3: 16
+        case 4: 14.5
+        case 5: 13.5
+        default: 12.5
+        }
+        return Text(content)
+            .font(.system(size: size, weight: level <= 2 ? .bold : .semibold))
+            .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
@@ -1202,6 +1481,16 @@ struct UpdateSheet: View {
                 .foregroundStyle(.secondary)
             }
             Spacer()
+            Button {
+                updateCenter.publishPanelDismissal()
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 11, weight: .semibold))
+                    .frame(width: 24, height: 24)
+            }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("update-close-button")
+            .accessibilityLabel(l10n.s("关闭", "Close"))
         }
         .padding(.horizontal, 24)
         .padding(.vertical, 18)
@@ -1311,12 +1600,11 @@ struct UpdateSheet: View {
                         .font(.system(size: 13))
                         .foregroundStyle(.secondary)
                 } else {
-                    Text(ReleaseNotesFormatter.attributedString(
-                        from: release.releaseNotes,
+                    ReleaseNotesView(
+                        markdown: release.releaseNotes,
                         baseURL: release.pageURL
-                    ))
+                    )
                         .textSelection(.enabled)
-                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
             .padding(14)

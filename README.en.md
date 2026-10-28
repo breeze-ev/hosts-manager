@@ -26,6 +26,7 @@ Hosts Manager manages the domain-to-IP mappings in `/etc/hosts`, serving two mai
 - Native Swift (SwiftUI + Swift)
 - Structured list editing and raw `/etc/hosts` source editing
 - Conflict and duplicate detection before writes
+- Automatic merging that preserves entries added through other tools
 - Real-time apply when enabled profiles change
 - Automatic timestamped backups with restore
 - Optional silent writes through a privileged LaunchDaemon helper

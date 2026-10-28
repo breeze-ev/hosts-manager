@@ -76,8 +76,11 @@ nonisolated enum HostsParser {
         }.joined(separator: "\n")
     }
 
-    /// Merge a profile's enabled entries with the always-present system entries.
-    static func mergedContent(entries: [ParsedHostEntry]) -> String {
+    /// Merge managed entries with external entries that are not owned by a profile.
+    static func mergedContent(
+        entries: [ParsedHostEntry],
+        externalEntries: [ParsedHostEntry] = []
+    ) -> String {
         var lines: [String] = ["# Managed by Hosts Manager — do not edit by hand", ""]
         lines.append("# --- System ---")
         lines.append("")
@@ -87,7 +90,24 @@ nonisolated enum HostsParser {
         // Everything user-authored goes into the User section; entries whose
         // hostname is localhost/broadcasthost are covered by System above.
         let user = entries.filter { $0.isEnabled && !$0.hostnames.contains { systemNames.contains($0.lowercased()) } }
-        for entry in dedupe(user) { lines.append(line(for: entry)) }
+        var seenMappings = Set<String>()
+        for entry in dedupeMappings(user, seen: &seenMappings) {
+            lines.append(line(for: entry))
+        }
+        lines.append("")
+        lines.append("# --- External ---")
+        for entry in dedupeMappings(
+            externalEntries.filter(\.isEnabled),
+            seen: &seenMappings
+        ) {
+            lines.append(line(for: entry))
+        }
+        for entry in dedupeMappings(
+            externalEntries.filter { !$0.isEnabled },
+            seen: &seenMappings
+        ) {
+            lines.append("# " + line(for: entry))
+        }
         return lines.joined(separator: "\n") + "\n"
     }
 
@@ -109,6 +129,27 @@ nonisolated enum HostsParser {
         }
     }
 
+    /// Collapse identical IP/hostname mappings while preserving the order and
+    /// descriptions of the first occurrence.
+    static func dedupeMappings(
+        _ entries: [ParsedHostEntry],
+        seen: inout Set<String>
+    ) -> [ParsedHostEntry] {
+        entries.compactMap { entry in
+            var hostnames: [String] = []
+            for hostname in entry.hostnames {
+                let key = entry.ip.lowercased() + "|" + hostname.lowercased()
+                if seen.insert(key).inserted {
+                    hostnames.append(hostname)
+                }
+            }
+            guard !hostnames.isEmpty else { return nil }
+            var result = entry
+            result.hostnames = hostnames
+            return result
+        }
+    }
+
     static func entriesEquivalent(
         _ lhs: [ParsedHostEntry],
         _ rhs: [ParsedHostEntry]
@@ -121,6 +162,35 @@ nonisolated enum HostsParser {
                 left.isEnabled == right.isEnabled &&
                 left.isSystem == right.isSystem
         }
+    }
+}
+
+/// Combines profile-managed entries with valid entries from the live system
+/// file. Profile hostnames always win; unowned entries are retained as an
+/// external layer and are never imported into Core Data.
+nonisolated enum HostsContentMerger {
+    static func merge(
+        liveContent: String,
+        managedEntries: [ParsedHostEntry],
+        ownedHostnames: Set<String>
+    ) -> String {
+        let reserved = Set(
+            ownedHostnames.map { $0.lowercased() }
+                + HostsParser.systemNames.map { $0.lowercased() }
+        )
+        let external = HostsParser.parse(liveContent).compactMap { entry -> ParsedHostEntry? in
+            let externalHostnames = entry.hostnames.filter {
+                !reserved.contains($0.lowercased())
+            }
+            guard !externalHostnames.isEmpty else { return nil }
+            var result = entry
+            result.hostnames = externalHostnames
+            return result
+        }
+        return HostsParser.mergedContent(
+            entries: managedEntries,
+            externalEntries: external
+        )
     }
 }
 
@@ -145,17 +215,11 @@ enum HostValidator {
     }
 }
 
-enum HostsReconciliationState: Equatable {
-    case noActiveProfiles
-    case inSync
-    case externalContent
-    case unreadable
-}
-
 nonisolated struct HostsReconciliationBaseline: Equatable {
     let fingerprint: String
     let appliedProfileIDs: [UUID]
     let pendingAppliedProfileIDs: [UUID]?
+    let managedHostnames: [String]
     let stateCommitFailed: Bool
 }
 
@@ -163,6 +227,7 @@ nonisolated enum HostsReconciliationBaselineStore {
     private static let fingerprintKey = "hostsReconciliation.fingerprint"
     private static let appliedProfileIDsKey = "hostsReconciliation.appliedProfileIDs"
     private static let pendingAppliedProfileIDsKey = "hostsReconciliation.pendingAppliedProfileIDs"
+    private static let managedHostnamesKey = "hostsReconciliation.managedHostnames"
     private static let stateCommitFailedKey = "hostsReconciliation.stateCommitFailed"
 
     static func load(from defaults: UserDefaults = .standard) -> HostsReconciliationBaseline? {
@@ -175,6 +240,7 @@ nonisolated enum HostsReconciliationBaselineStore {
             fingerprint: fingerprint,
             appliedProfileIDs: rawIDs.compactMap(UUID.init(uuidString:)),
             pendingAppliedProfileIDs: pendingRawIDs?.compactMap(UUID.init(uuidString:)),
+            managedHostnames: defaults.stringArray(forKey: managedHostnamesKey) ?? [],
             stateCommitFailed: defaults.bool(forKey: stateCommitFailedKey)
         )
     }
@@ -204,6 +270,10 @@ nonisolated enum HostsReconciliationBaselineStore {
         } else {
             defaults.removeObject(forKey: pendingAppliedProfileIDsKey)
         }
+        defaults.set(
+            baseline.managedHostnames,
+            forKey: managedHostnamesKey
+        )
         defaults.set(baseline.stateCommitFailed, forKey: stateCommitFailedKey)
     }
 
@@ -225,6 +295,7 @@ nonisolated enum HostsReconciliationBaselineStore {
     static func markPendingWrite(
         fingerprint: String,
         appliedProfileIDs: [UUID],
+        managedHostnames: [String],
         from defaults: UserDefaults = .standard
     ) {
         save(
@@ -232,6 +303,7 @@ nonisolated enum HostsReconciliationBaselineStore {
                 fingerprint: fingerprint,
                 appliedProfileIDs: appliedProfileIDs,
                 pendingAppliedProfileIDs: appliedProfileIDs,
+                managedHostnames: managedHostnames,
                 stateCommitFailed: true
             ),
             to: defaults
@@ -248,26 +320,12 @@ nonisolated enum HostsReconciliationBaselineStore {
         defaults.removeObject(forKey: fingerprintKey)
         defaults.removeObject(forKey: appliedProfileIDsKey)
         defaults.removeObject(forKey: pendingAppliedProfileIDsKey)
+        defaults.removeObject(forKey: managedHostnamesKey)
         defaults.removeObject(forKey: stateCommitFailedKey)
     }
 }
 
 nonisolated enum HostsReconciliation {
-    /// Compares the live file with the content produced by the currently
-    /// applied profiles. The comparison is canonical so formatting or comment
-    /// changes do not produce a false external-edit warning.
-    static func inspect(
-        liveContent: String?,
-        expectedContent: String,
-        hasActiveProfiles: Bool
-    ) -> HostsReconciliationState {
-        guard hasActiveProfiles else { return .noActiveProfiles }
-        guard let liveContent else { return .unreadable }
-        return canonical(liveContent) == canonical(expectedContent)
-            ? .inSync
-            : .externalContent
-    }
-
     static func canonical(_ content: String) -> String {
         var mappings = Set<String>()
         for entry in HostsParser.parse(content) where entry.isEnabled {
@@ -276,25 +334,6 @@ nonisolated enum HostsReconciliation {
             }
         }
         return mappings.sorted().joined(separator: "\n")
-    }
-
-    static func requiresReconciliation(
-        liveContent: String?,
-        lastKnownFingerprint: String?,
-        stateCommitFailed: Bool
-    ) -> Bool {
-        if stateCommitFailed {
-            return true
-        }
-        guard let liveContent else {
-            return false
-        }
-        guard let lastKnownFingerprint else {
-            // With no trusted baseline, the current file cannot be proven to
-            // match the persisted applied state.
-            return true
-        }
-        return canonical(liveContent) != lastKnownFingerprint
     }
 }
 

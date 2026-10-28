@@ -2,6 +2,13 @@
 
 [中文](CHANGELOG.md)
 
+## Unreleased
+
+### Improved
+
+- Valid entries added to `/etc/hosts` by external tools are preserved and merged automatically on the next write. The reconciliation prompt no longer blocks profile changes, while hostnames managed by a profile still use the app's value and identical IP/hostname mappings are deduplicated.
+- Failed profile-state saves still pause further writes and provide a recovery path, preventing the file and profile switches from diverging silently.
+
 ## 1.0.0 - 2026-10-27
 
 First stable release.
