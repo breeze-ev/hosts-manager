@@ -139,6 +139,9 @@ fi
 echo "Building Hosts Manager ${VERSION} (${BUILD_NUMBER}) with Apple Development signing..."
 (
   cd "$ROOT_DIR"
+  # Sparkle's generator can merge an appcast already present at the output path.
+  # Remove only generated local feeds so a smoke-test build cannot leak into a release.
+  rm -f "$ROOT_DIR/dist/appcast-arm64.xml" "$ROOT_DIR/dist/appcast-x86_64.xml"
   GENERATE_APPCAST=1 \
   RELEASE_NOTES_HTML="$NOTES_HTML" \
   RELEASE_TAG="$VERSION" \
@@ -159,6 +162,10 @@ for arch in arm64 x86_64; do
   fi
   if ! grep -q 'sparkle-signatures:' "$APPCAST_PATH"; then
     echo "Generated appcast is not signed for ${arch}." >&2
+    exit 1
+  fi
+  if ! grep -Fq "<sparkle:version>${BUILD_NUMBER}</sparkle:version>" "$APPCAST_PATH"; then
+    echo "Generated appcast does not contain build ${BUILD_NUMBER} for ${arch}." >&2
     exit 1
   fi
 done

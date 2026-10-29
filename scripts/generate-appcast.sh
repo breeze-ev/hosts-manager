@@ -106,7 +106,7 @@ fi
 
 # Existing apps that predate Sparkle have no SUPublicEDKey in their bundle, so
 # generate_appcast cannot infer that the new enclosure should be signed.
-if ! rg -q "<enclosure[^>]*${DMG_NAME}[^>]*sparkle:edSignature[^>]*>" "$OUTPUT_PATH"; then
+if ! grep -Eq "<enclosure[^>]*${DMG_NAME}[^>]*sparkle:edSignature[^>]*>" "$OUTPUT_PATH"; then
   SIGNATURE_OUTPUT="$(sign_file "$DMG_PATH")"
   DMG_SIGNATURE="$(printf '%s\n' "$SIGNATURE_OUTPUT" |
     sed -E 's/.*sparkle:edSignature="([^"]+)".*/\1/')"
@@ -142,7 +142,7 @@ fi
 
 sign_file "$OUTPUT_PATH" >/dev/null
 
-if ! rg -q 'sparkle-signatures:' "$OUTPUT_PATH"; then
+if ! grep -q 'sparkle-signatures:' "$OUTPUT_PATH"; then
   echo "Generated appcast feed is not signed: $OUTPUT_PATH" >&2
   exit 1
 fi

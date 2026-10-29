@@ -34,4 +34,4 @@ jobs:
       - name: Verify bundle identifiers and deployment target
         run: |
           plutil -p "build/Build/Products/Release/Hosts Manager.app/Contents/Info.plist" | \
-            rg 'personal.hosts-manager|26.0|SUPublicEDKey'
+            grep -E 'personal.hosts-manager|26.0|SUPublicEDKey'
