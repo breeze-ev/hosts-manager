@@ -30,9 +30,9 @@ Hosts Manager 用于管理 `/etc/hosts` 中的域名与 IP 映射，主要有两
 - 启用配置变更后实时应用
 - 自动生成带时间戳的备份并支持还原
 - 可选的静默后台写入助手
-- 每日自动检查稳定版更新，也可按当前芯片下载、校验并打开 DMG
+- 每日自动检查稳定版更新；使用 Sparkle 标准更新窗口完成下载、EdDSA 校验、自动安装并重启
 - 中文与英文界面
-- 无遥测、无第三方统计；仅在检查更新时访问 GitHub Releases
+- 无遥测、无第三方统计；仅通过 Sparkle 访问签名 appcast 与 GitHub Releases 检查、下载更新
 
 ## 环境要求
 
@@ -56,6 +56,8 @@ Hosts Manager 用于管理 `/etc/hosts` 中的域名与 IP 映射，主要有两
 2. 将 **Hosts Manager** 拖入 **Applications** 文件夹。
 3. 从"应用程序"中启动 Hosts Manager。
 
+当前开源发布不要求付费 Apple Developer Program，使用免费的 Apple Development 证书签名，并且没有经过 Apple 公证。首次启动若被 Gatekeeper 拦截，请前往 **系统设置 → 隐私与安全性**，在安全提示旁选择 **仍要打开**。不要使用 ad-hoc 构建，因为它的后台写入助手无法完成系统注册。
+
 ## 从源码构建
 
 ```bash
@@ -65,6 +67,8 @@ open hosts-manager.xcodeproj
 ```
 
 在 Signing & Capabilities 中为 `hosts-manager` 和 `HostsManagerHelper` 两个 Target 选择你自己的开发团队。应用与 Helper 必须使用同一团队签名，Helper 才能校验调用方。
+
+Xcode 会通过 Swift Package Manager 自动解析并固定 `Sparkle 2.9.6`，无需手动安装依赖。
 
 也可以使用命令行构建：
 
@@ -86,13 +90,34 @@ xcodebuild build \
 
 ```bash
 ./scripts/build-dmg.sh           # Developer ID 签名 + 公证（需要付费开发者证书）
-./scripts/build-dmg.sh --dev     # Apple Development 签名、跳过公证，适合本地自用（推荐）
+./scripts/build-dmg.sh --dev     # 免费 Apple Development 签名、跳过公证，后台助手可用（无付费账号推荐）
 ./scripts/build-dmg.sh --adhoc   # ad-hoc 签名、跳过公证，无需证书（注意：后台写入助手不可用，见下）
 ```
 
-公证需要设置 `APPLE_API_KEY_ID`、`APPLE_API_ISSUER_ID` 和 `APPLE_API_KEY_PATH` 环境变量；只想跳过公证可传 `--skip-notarize`。产物输出到 `dist/` 目录，并附带 sha256 校验文件。
+只有 Developer ID 正式发布才需要 `APPLE_API_KEY_ID`、`APPLE_API_ISSUER_ID` 和 `APPLE_API_KEY_PATH` 来做公证。没有付费开发者账号时使用 `--dev`，不需要 Apple API Key、Issuer ID 或公证凭据。产物输出到 `dist/` 目录，并附带 sha256 校验文件。
 
-> **注意签名方式**：后台写入助手通过 SMAppService 注册，而系统的“登录项与扩展”批准与代码签名身份绑定。ad-hoc 签名没有稳定身份，开关能打开但守护进程永远不会真正注册，App 会持续提示“后台写入助手不可用”。本地自用请用 `--dev`（钥匙串里有免费的 Apple Development 证书即可），正式发布用 Developer ID。
+没有付费开发者账号时，发布在维护者自己的 Mac 上完成。先安装 GitHub CLI 与 pandoc，并登录 GitHub：
+
+```bash
+brew install gh pandoc
+gh auth login
+```
+
+确认 Keychain 中存在有效的 **Apple Development** 证书和 Sparkle 私钥后，执行：
+
+```bash
+./scripts/release-local.sh --version 1.0.1 --build-number 20
+```
+
+脚本会使用 `--dev` 构建两个架构、从 `CHANGELOG.md` 生成白底 HTML 发布说明、签名两个 Sparkle appcast、创建 GitHub Release，并提交推送更新后的 appcast。仓库只保存 `SUPublicEDKey`；Sparkle 私钥始终留在维护者钥匙串中，当前发布流程不需要 `SPARKLE_PRIVATE_KEY` GitHub Secret。首次配置 Sparkle 密钥可运行：
+
+```bash
+/path/to/Sparkle/bin/generate_keys --account personal.hosts-manager
+```
+
+GitHub 托管的 Actions 运行器无法访问你的免费个人开发证书，因此不要在那里发布 ad-hoc DMG：后台写入助手不可用。`scripts/generate-appcast.sh` 也可单独用于更新 appcast；签名后的 feed 保存在 `Sparkle/`，应用通过稳定的 Raw 地址按当前芯片选择对应 feed。
+
+> **注意签名方式**：后台写入助手通过 SMAppService 注册，而系统的“登录项与扩展”批准与代码签名身份绑定。ad-hoc 签名没有稳定身份，开关能打开但守护进程永远不会真正注册。没有付费账号时请使用 `--dev`（免费 Apple Development 证书）并指导用户首次启动时在“隐私与安全性”中允许打开；需要面向大量用户无提示分发时，才需要付费的 Developer ID 与 Apple 公证。
 
 ## 文档
 
@@ -101,6 +126,7 @@ xcodebuild build \
 - [贡献指南](CONTRIBUTING.md)
 - [安全说明](SECURITY.md)
 - [隐私说明](PRIVACY.md)
+- [第三方声明](hosts-manager/ThirdPartyNotices.txt)
 
 ## 许可证
 

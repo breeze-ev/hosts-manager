@@ -11,6 +11,7 @@
 		A840FE2F308F151D0036F61E /* .gitingnore in Resources */ = {isa = PBXBuildFile; fileRef = A840FE2E308F15110036F61E /* .gitingnore */; };
 		B1000000000000000000000B /* HostsManagerHelper in Copy Helper Executable */ = {isa = PBXBuildFile; fileRef = B1000000000000000000000E /* HostsManagerHelper */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
 		B1000000000000000000000D /* com.breeze.hostsmanager.helper.plist in Copy Helper Plist */ = {isa = PBXBuildFile; fileRef = B1000000000000000000000F /* com.breeze.hostsmanager.helper.plist */; };
+		B20000000000000000000001 /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = B20000000000000000000002 /* Sparkle */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -74,7 +75,7 @@
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
-		A8EA9D16303558C000530128 /* hosts-manager */ = {
+		A80CCF8C3093412900EA639B /* hosts-manager */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			path = "hosts-manager";
 			sourceTree = "<group>";
@@ -106,6 +107,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				B20000000000000000000001 /* Sparkle in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -136,7 +138,7 @@
 		A8EA9D0B303558C000530128 = {
 			isa = PBXGroup;
 			children = (
-				A8EA9D16303558C000530128 /* hosts-manager */,
+				A80CCF8C3093412900EA639B /* hosts-manager */,
 				B10000000000000000000010 /* Shared */,
 				B10000000000000000000011 /* HostsHelper */,
 				B1000000000000000000000F /* com.breeze.hostsmanager.helper.plist */,
@@ -180,11 +182,12 @@
 				B10000000000000000000009 /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
-				A8EA9D16303558C000530128 /* hosts-manager */,
+				A80CCF8C3093412900EA639B /* hosts-manager */,
 				B10000000000000000000010 /* Shared */,
 			);
 			name = "hosts-manager";
 			packageProductDependencies = (
+				B20000000000000000000002 /* Sparkle */,
 			);
 			productName = "hosts-manager";
 			productReference = A8EA9D14303558C000530128 /* Hosts Manager.app */;
@@ -294,6 +297,9 @@
 			);
 			mainGroup = A8EA9D0B303558C000530128;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				B20000000000000000000003 /* XCRemoteSwiftPackageReference "Sparkle" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = A8EA9D15303558C000530128 /* Products */;
 			projectDirPath = "";
@@ -548,11 +554,8 @@
 				ENABLE_PREVIEWS = YES;
 				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				ENABLE_USER_SELECTED_FILES = readonly;
-				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_KEY_CFBundleDisplayName = "Hosts Manager";
-				INFOPLIST_KEY_CFBundleName = "Hosts Manager";
-				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
-				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Config/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
@@ -587,11 +590,8 @@
 				ENABLE_PREVIEWS = YES;
 				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				ENABLE_USER_SELECTED_FILES = readonly;
-				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_KEY_CFBundleDisplayName = "Hosts Manager";
-				INFOPLIST_KEY_CFBundleName = "Hosts Manager";
-				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.developer-tools";
-				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Config/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
@@ -776,6 +776,25 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		B20000000000000000000003 /* XCRemoteSwiftPackageReference "Sparkle" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/sparkle-project/Sparkle";
+			requirement = {
+				kind = exactVersion;
+				version = 2.9.6;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		B20000000000000000000002 /* Sparkle */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = B20000000000000000000003 /* XCRemoteSwiftPackageReference "Sparkle" */;
+			productName = Sparkle;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = A8EA9D0C303558C000530128 /* Project object */;
 }

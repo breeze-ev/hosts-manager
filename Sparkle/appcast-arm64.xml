@@ -1,0 +1,59 @@
+<?xml version="1.0" standalone="yes"?><!-- sparkle-sign-warning:
+IMPORTANT: This file was signed by Sparkle. Any modifications to this file requires re-signing this file with generate_appcast or sign_update! The signed signature will be embedded at the end of this file.
+--><rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" version="2.0">
+    <channel>
+        <title>Hosts Manager</title>
+        <item>
+            <title>1.0.0</title>
+            <pubDate>Wed, 28 Oct 2026 18:02:43 +0800</pubDate>
+            <link>https://breeze-ev.github.io/hosts-manager/</link>
+            <sparkle:version>7</sparkle:version>
+            <sparkle:shortVersionString>1.0.0</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>26.0</sparkle:minimumSystemVersion>
+            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+            <description><![CDATA[<style>body{background:#fff;color:#1d1d1f;font:14px -apple-system,BlinkMacSystemFont,"SF Pro Text",sans-serif;line-height:1.55;padding:8px 4px}h2{font-size:20px;margin:0 0 12px}h3{font-size:15px;margin:18px 0 8px}code{background:#f2f2f7;border-radius:4px;padding:1px 4px}li{margin:4px 0}</style>
+<h2>Hosts Manager 1.0.0</h2>
+<p>首个稳定版。</p>
+<h3 id="新增">新增</h3>
+<ul>
+<li>应用内更新中心：菜单栏 <code>检查更新…</code>（⇧⌘U）与设置页均可检查
+GitHub 稳定版，每日最多自动检查一次。支持按 Apple Silicon / Intel
+下载对应 DMG、显示下载进度、取消下载、优先校验 SHA-256、在 Finder
+中显示安装包，并在写入隔离属性后打开；发布页可作为备用入口。</li>
+<li>从文件导入 hosts 配置：支持 <code>.hosts</code>
+或纯文本，读取用户条目并创建为未应用配置；限制 1
+MiB，并对编码、内容和空条目给出错误提示。</li>
+<li><code>/etc/hosts</code>
+对账保护：启动时和写入前比对系统文件与已应用配置；外部修改或状态提交失败会阻止继续覆盖，并允许选择“保留系统文件”或“重新应用配置”。</li>
+<li>源码草稿管理：保留未应用草稿，识别列表与源码冲突，支持“放弃修改”；草稿与已保存内容等价时不再重写配置。</li>
+</ul>
+<h3 id="优化">优化</h3>
+<ul>
+<li><code>/etc/hosts</code>
+写入改为按提交顺序串行执行，连续开关配置、实时应用和恢复备份不再因并发写入误报失败。</li>
+<li>备份清理先同步记录再清理文件，并保留仍被记录引用的备份；备份删除与还原状态在保存失败时回滚。</li>
+<li>将备份还原到 <code>/etc/hosts</code>
+时停用全部用户配置，避免后续编辑再次覆盖还原内容。</li>
+<li>组合启用时自动合并完全重复条目；应用面板可清理已应用配置中的重复项，主机名冲突仍会阻断写入。</li>
+<li>设置页新增软件更新状态；配置、备份和错误提示补充无障碍标签与更清晰的文案。</li>
+</ul>
+<h3 id="修复">修复</h3>
+<ul>
+<li>修正配置开关与实际写入状态不同步的问题；新建、导入或复制的配置默认为未应用。</li>
+<li>修复外部修改后连续写入失败，以及实时应用重试可能丢失最后一次变更的问题。</li>
+<li>修复写入成功但 Core Data
+提交失败时，应用状态被回滚或下次启动后被覆盖的问题。</li>
+</ul>
+<h3 id="发布">发布</h3>
+<ul>
+<li>提供 arm64（Apple Silicon）与 x86_64（Intel）DMG，附 sha256
+校验文件。</li>
+</ul>
+]]></description>
+            <enclosure url="https://github.com/breeze-ev/hosts-manager/releases/download/1.0.0/Hosts-Manager-1.0.0-7-arm64.dmg" length="3341244" sparkle:edSignature="9A7CDr6vQ+cc0lpVwgKyDe2oh5ly3dxSJybpvEWMCTwhPCgQ9GeyCtJp2ur7LV7E7Ry1p5DjmWLCnlr9p+KrBw==" type="application/octet-stream"></enclosure>
+        </item>
+    </channel>
+</rss><!-- sparkle-signatures:
+edSignature: 9o0RNfZx+yJEz0eCfMHOJN2W7SkQm96YOkoz2w1zPuZYC5OibYuEemz/G/m7n+8MF8DiLW6alK3y6TcWYFKNAg==
+length: 3905
+-->

@@ -21,12 +21,14 @@ xcodebuild test \
 - Keep changes scoped to the behavior or area described in the issue.
 - Preserve the existing SwiftUI design language and bilingual copy.
 - Add tests for parser, validator, backup, persistence, or helper contract changes.
-- Do not add telemetry, analytics, or new third-party dependencies without a clear product need. Network requests must be limited to documented, essential functionality such as update checks, with matching privacy documentation and tests.
+- Do not add telemetry, analytics, or new third-party dependencies without a clear product need. Sparkle is the approved updater dependency; network requests must stay limited to its signed appcast and GitHub Releases, with matching privacy documentation and tests.
 - Mention in the pull request when a change affects `/etc/hosts` writing or the helper.
 
 ## Helper Signing
 
 The app and `HostsManagerHelper` must be signed by the same team. The helper reads its own signing team and uses it to build the code requirement for the caller, so a local development team works as long as both targets use it.
+
+Contributors without the paid Apple Developer Program can use the free Apple Development certificate from an Xcode Personal Team. Ad-hoc signing is not sufficient for a working background helper; use `./scripts/build-dmg.sh --dev` for local DMG testing.
 
 ## Reporting Issues
 

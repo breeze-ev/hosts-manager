@@ -4,10 +4,15 @@
 
 ## Unreleased
 
+### Changed
+
+- Update checks now use Sparkle 2.9.6's standard update window: daily signed-appcast checks, a manual flow with release notes, download progress and **Install Update**, followed by in-place replacement and relaunch. The custom GitHub API, token, SHA-256 download and DMG mounting flow has been removed.
+
 ### Improved
 
 - Valid entries added to `/etc/hosts` by external tools are preserved and merged automatically on the next write. The reconciliation prompt no longer blocks profile changes, while hostnames managed by a profile still use the app's value and identical IP/hostname mappings are deduplicated.
 - Failed profile-state saves still pause further writes and provide a recovery path, preventing the file and profile switches from diverging silently.
+- Release packaging now supports free Apple Development certificates: `--dev` keeps the background helper working without a paid developer account, and `scripts/release-local.sh` signs appcasts and creates the GitHub Release locally. Ad-hoc builds are no longer used for public releases.
 
 ## 1.0.0 - 2026-10-27
 

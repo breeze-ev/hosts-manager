@@ -143,8 +143,8 @@ enum HostsHelperClient {
         }
         if isSMError && nsError.code == 1 {
             return isEnglish
-                ? "The app signature is invalid. The helper can only be installed by a properly signed build (use a Developer ID identity for release)."
-                : "应用签名无效，无法安装后台写入助手。请使用有效签名构建（正式发布请使用 Developer ID）。"
+                ? "The app signature is invalid. The helper requires a build signed with an Apple Development or Developer ID identity."
+                : "应用签名无效，无法安装后台写入助手。请使用 Apple Development 或 Developer ID 签名构建。"
         }
         if isSMError && [3, 8, 9].contains(nsError.code) {
             return isEnglish

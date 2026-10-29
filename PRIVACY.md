@@ -10,8 +10,8 @@ Hosts Manager is designed to keep your data on your Mac.
 
 ## Network and Telemetry
 
-- The app checks GitHub Releases automatically at most once every 24 hours, and when you choose **Check for Updates** from the app menu or Settings.
-- The update check requests `https://api.github.com/repos/breeze-ev/hosts-manager/releases/latest` without authentication. If you choose to install an update, the app downloads the matching DMG and, when available, its `.sha256` file from the URLs published in that GitHub release.
+- The bundled Sparkle updater checks a signed appcast automatically at most once every 24 hours, and when you choose **Check for Updates** from the app menu or Settings.
+- The appcast is served from the public repository through `raw.githubusercontent.com`. If an update is available and you choose to install it, Sparkle downloads the architecture-specific DMG from GitHub Releases and verifies the signed feed and update with EdDSA. macOS may additionally apply Gatekeeper checks to the downloaded app.
 - These requests necessarily disclose standard network information, such as your IP address, to GitHub. GitHub's own privacy terms apply. Profiles, hosts content, backups, and settings are never included in update requests.
 - The app does not collect usage telemetry.
 - The app does not include third-party analytics or advertising SDKs.

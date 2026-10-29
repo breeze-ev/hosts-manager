@@ -14,6 +14,9 @@ OUTPUT_DIR="${OUTPUT_DIR:-dist}"
 SKIP_NOTARIZE="${SKIP_NOTARIZE:-0}"
 ADHOC="${ADHOC:-0}"
 DEV="${DEV:-0}"
+GENERATE_APPCAST="${GENERATE_APPCAST:-0}"
+RELEASE_NOTES_HTML="${RELEASE_NOTES_HTML:-}"
+SPARKLE_ACCOUNT="${SPARKLE_ACCOUNT:-personal.hosts-manager}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -24,7 +27,7 @@ Usage: build-dmg.sh [options]
 Signing modes (pick one):
   (default)            Developer ID signing + notarization (paid certificate; for release)
   --dev                Apple Development signing, skips notarization; stable identity so the
-                       SMAppService background helper works. Recommended for local use.
+                       SMAppService background helper works. Recommended without a paid account.
   --adhoc              Ad-hoc signing, no certificate needed. WARNING: Login Items approval
                        never sticks for ad-hoc builds, so the background helper stays
                        unavailable. Only useful for UI testing.
@@ -36,6 +39,9 @@ Other options:
   --signing-identity S Override the code signing identity
   --output-dir DIR     Output directory (default: dist)
   --skip-notarize      Build signed DMGs without notarizing
+
+For a complete development-signed release and Sparkle appcast, use:
+  ./scripts/release-local.sh --version VERSION --build-number N
 USAGE
       exit 0
       ;;
@@ -90,6 +96,8 @@ if [[ -z "$TEAM_ID" ]]; then
   exit 1
 fi
 
+RELEASE_TAG="${RELEASE_TAG:-$VERSION}"
+
 WORK_DIR="$(mktemp -d)"
 trap 'rm -rf "$WORK_DIR"' EXIT
 
@@ -130,6 +138,7 @@ PLIST
 mkdir -p "$ROOT_DIR/$OUTPUT_DIR"
 
 DMG_PATHS=()
+DMG_ARCHES=()
 
 for ARCH in arm64 x86_64; do
   ARCHIVE_PATH="$WORK_DIR/HostsManager-${ARCH}.xcarchive"
@@ -229,33 +238,69 @@ for ARCH in arm64 x86_64; do
     -format UDZO \
     "$DMG_PATH"
 
-  shasum -a 256 "$DMG_PATH" > "$DMG_PATH.sha256"
   DMG_PATHS+=("$DMG_PATH")
+  DMG_ARCHES+=("$ARCH")
 done
 
 if [[ "$SKIP_NOTARIZE" == "1" ]]; then
   echo "Skipping notarization."
-  printf 'Built %s\n' "${DMG_PATHS[@]}"
-  exit 0
-fi
+else
+  if [[ -z "${APPLE_API_KEY_ID:-}" || -z "${APPLE_API_ISSUER_ID:-}" || -z "${APPLE_API_KEY_PATH:-}" ]]; then
+    echo "Notarization requested but APPLE_API_KEY_ID, APPLE_API_ISSUER_ID, and APPLE_API_KEY_PATH are not set." >&2
+    exit 1
+  fi
 
-if [[ -z "${APPLE_API_KEY_ID:-}" || -z "${APPLE_API_ISSUER_ID:-}" || -z "${APPLE_API_KEY_PATH:-}" ]]; then
-  echo "Notarization requested but APPLE_API_KEY_ID, APPLE_API_ISSUER_ID, and APPLE_API_KEY_PATH are not set." >&2
-  exit 1
+  for DMG_PATH in "${DMG_PATHS[@]}"; do
+    echo "Submitting for notarization: $DMG_PATH"
+    xcrun notarytool submit "$DMG_PATH" \
+      --wait \
+      --key-id "$APPLE_API_KEY_ID" \
+      --issuer "$APPLE_API_ISSUER_ID" \
+      --key "$APPLE_API_KEY_PATH" \
+      --team-id "$TEAM_ID"
+
+    echo "Stapling and validating..."
+    xcrun stapler staple "$DMG_PATH"
+    spctl --assess --type execute --verbose=4 "$DMG_PATH" || true
+  done
 fi
 
 for DMG_PATH in "${DMG_PATHS[@]}"; do
-  echo "Submitting for notarization: $DMG_PATH"
-  xcrun notarytool submit "$DMG_PATH" \
-    --wait \
-    --key-id "$APPLE_API_KEY_ID" \
-    --issuer "$APPLE_API_ISSUER_ID" \
-    --key "$APPLE_API_KEY_PATH" \
-    --team-id "$TEAM_ID"
-
-  echo "Stapling and validating..."
-  xcrun stapler staple "$DMG_PATH"
-  spctl --assess --type execute --verbose=4 "$DMG_PATH" || true
+  shasum -a 256 "$DMG_PATH" > "$DMG_PATH.sha256"
 done
+
+if [[ "$GENERATE_APPCAST" == "1" ]]; then
+  for index in "${!DMG_PATHS[@]}"; do
+    ARCH="${DMG_ARCHES[$index]}"
+    DERIVED_DATA="$WORK_DIR/DerivedData-${ARCH}"
+    SPARKLE_TOOL="$(find "$DERIVED_DATA" -type f \
+      -path '*/artifacts/sparkle/Sparkle/bin/generate_appcast' \
+      -print -quit)"
+    if [[ -z "$SPARKLE_TOOL" ]]; then
+      echo "Sparkle generate_appcast was not found in ${DERIVED_DATA}" >&2
+      exit 1
+    fi
+
+    APPCAST_PATH="$ROOT_DIR/$OUTPUT_DIR/appcast-${ARCH}.xml"
+    if [[ -n "$RELEASE_NOTES_HTML" ]]; then
+      "$ROOT_DIR/scripts/generate-appcast.sh" \
+        --arch "$ARCH" \
+        --dmg "${DMG_PATHS[$index]}" \
+        --output "$APPCAST_PATH" \
+        --tool "$SPARKLE_TOOL" \
+        --release-tag "$RELEASE_TAG" \
+        --sparkle-account "$SPARKLE_ACCOUNT" \
+        --release-notes "$RELEASE_NOTES_HTML"
+    else
+      "$ROOT_DIR/scripts/generate-appcast.sh" \
+        --arch "$ARCH" \
+        --dmg "${DMG_PATHS[$index]}" \
+        --output "$APPCAST_PATH" \
+        --tool "$SPARKLE_TOOL" \
+        --release-tag "$RELEASE_TAG" \
+        --sparkle-account "$SPARKLE_ACCOUNT"
+    fi
+  done
+fi
 
 printf 'Built %s\n' "${DMG_PATHS[@]}"

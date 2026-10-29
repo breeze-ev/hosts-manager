@@ -9,6 +9,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        SparkleUpdater.shared.start()
         updateAppMenuTitle()
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
             self.updateAppMenuTitle()
@@ -29,7 +30,6 @@ struct HostsManagerApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     @StateObject private var persistenceController = PersistenceController.shared
     @StateObject private var l10n = Localization()
-    @StateObject private var updateCenter = UpdateCenter.forCurrentProcess()
     @AppStorage("language") private var language = "system"
 
     private var isEnglish: Bool {
@@ -47,18 +47,12 @@ struct HostsManagerApp: App {
                 }
             }
             .environmentObject(l10n)
-            .environmentObject(updateCenter)
-            .task {
-                try? await Task.sleep(for: .seconds(3))
-                guard !Task.isCancelled else { return }
-                await updateCenter.checkAutomaticallyIfDue()
-            }
         }
         .windowToolbarStyle(.unified)
         .commands {
             CommandGroup(after: .appInfo) {
                 Button(isEnglish ? "Check for Updates…" : "检查更新…") {
-                    Task { await updateCenter.checkForUpdates(manual: true) }
+                    SparkleUpdater.shared.checkForUpdates()
                 }
                 .keyboardShortcut("u", modifiers: [.command, .shift])
                 .accessibilityIdentifier("check-for-updates-menu-item")

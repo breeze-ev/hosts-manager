@@ -1,6 +1,6 @@
 import Foundation
 
-enum HostsHelperConstants {
+nonisolated enum HostsHelperConstants {
     static let serviceName = "com.breeze.hostsmanager.helper"
     static let daemonPlistName = "com.breeze.hostsmanager.helper.plist"
     static let clientBundleIdentifier = "personal.hosts-manager"

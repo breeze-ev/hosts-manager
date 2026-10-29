@@ -333,7 +333,6 @@ struct ContentView: View {
     ], animation: .default)
     private var profiles: FetchedResults<Profile>
     @EnvironmentObject private var l10n: Localization
-    @EnvironmentObject private var updateCenter: UpdateCenter
     @AppStorage("appearance") private var appearance = "system"
     @AppStorage("backgroundBlurEnabled") private var backgroundBlurEnabled = true
 
@@ -343,7 +342,6 @@ struct ContentView: View {
     @State private var didApplyDefaultMode = false
     @State private var showApply = false
     @State private var applyDraftText: String?
-    @State private var isUpdatePanelPresented = false
     @State private var query = ""
     @State private var sourceDrafts: [UUID: String] = [:]
     /// 源码草稿与列表内容发生冲突的配置：草稿不会被静默丢弃，而是标记出来让用户决定。
@@ -415,25 +413,8 @@ struct ContentView: View {
                 )
             }
         }
-        .sheet(isPresented: $isUpdatePanelPresented, onDismiss: {
-            updateCenter.panelDidDismiss()
-        }) {
-            UpdateSheet(updateCenter: updateCenter)
-        }
-        .onChange(of: updateCenter.isPanelPresented) { _, isPresented in
-            isUpdatePanelPresented = isPresented
-        }
-        .onAppear {
-            isUpdatePanelPresented = updateCenter.isPanelPresented
-        }
         .sheet(isPresented: $showHelperGuide) {
             HelperGuideSheet(onClose: { showHelperGuide = false })
-        }
-        .onChange(of: showApply || showHelperGuide) { _, isBlocked in
-            updateCenter.setPresentationBlocked(isBlocked)
-        }
-        .onAppear {
-            updateCenter.setPresentationBlocked(showApply || showHelperGuide)
         }
         .modifier(OperationErrorAlert(
             title: l10n.s("操作失败", "Operation Failed"),
@@ -3552,7 +3533,6 @@ struct HelperGuideSheet: View {
 struct SettingsView: View {
     @FetchRequest private var settings: FetchedResults<AppSettings>
     @EnvironmentObject private var l10n: Localization
-    @EnvironmentObject private var updateCenter: UpdateCenter
     @AppStorage("appearance") private var appearance = "system"
     @AppStorage("backgroundBlurEnabled") private var backgroundBlurEnabled = true
     @State private var retention = 30
@@ -3715,28 +3695,19 @@ struct SettingsView: View {
                     Text(l10n.s("软件更新", "Software Update"))
                         .font(.system(size: 13, weight: .semibold))
                     Text(l10n.s(
-                        "当前版本 \(updateCenter.displayedVersion)（\(updateCenter.currentBuildNumber)）",
-                        "Current version \(updateCenter.displayedVersion) (\(updateCenter.currentBuildNumber))"
+                        "当前版本 \(AppBuildInfo.shortVersion)（\(AppBuildInfo.buildNumber)）",
+                        "Current version \(AppBuildInfo.shortVersion) (\(AppBuildInfo.buildNumber))"
                     ))
                     .font(.system(size: 12))
                     .foregroundStyle(.secondary)
                 }
                 Spacer()
                 Button {
-                    Task { await updateCenter.checkForUpdates(manual: true) }
+                    SparkleUpdater.shared.checkForUpdates()
                 } label: {
-                    if updateCenter.isChecking {
-                        HStack(spacing: 7) {
-                            ProgressView()
-                                .controlSize(.small)
-                            Text(l10n.s("检查中…", "Checking…"))
-                        }
-                    } else {
-                        Text(l10n.s("检查更新…", "Check for Updates…"))
-                    }
+                    Text(l10n.s("检查更新…", "Check for Updates…"))
                 }
                 .buttonStyle(.glass)
-                .disabled(updateCenter.isChecking)
                 .accessibilityIdentifier("settings-check-for-updates")
             }
 

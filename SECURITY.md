@@ -4,7 +4,7 @@ Hosts Manager writes to `/etc/hosts`, a system file that requires elevated privi
 
 ## Supported Versions
 
-The current unreleased source tree is supported on macOS 26 and newer. Security fixes will be applied to the main branch and included in the next published release.
+The current unreleased source tree is supported on macOS 26 and newer. Security fixes will be applied to the default branch and included in the next published release.
 
 ## Reporting a Vulnerability
 
