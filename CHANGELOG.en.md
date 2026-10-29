@@ -4,6 +4,10 @@
 
 ## 1.0.1 - 2026-10-29
 
+### Added
+
+- Added an optional main-window background blur, enabled by default. It can be disabled with the **Background blur** switch in Settings to use a solid window background instead.
+
 ### Changed
 
 - Update checks now use Sparkle 2.9.6's standard update window: daily signed-appcast checks, a manual flow with release notes, download progress and **Install Update**, followed by in-place replacement and relaunch. The custom GitHub API, token, SHA-256 download and DMG mounting flow has been removed.
