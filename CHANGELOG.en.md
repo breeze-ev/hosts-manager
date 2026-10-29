@@ -6,7 +6,7 @@
 
 ### Added
 
-- Added an optional main-window background blur, enabled by default. It can be disabled with the **Background blur** switch in Settings to use a solid window background instead.
+- Added an optional main-window background blur, disabled by default. Enable **Background blur** in Settings to use a translucent material; otherwise the window uses a solid background.
 
 ### Changed
 

@@ -334,7 +334,7 @@ struct ContentView: View {
     private var profiles: FetchedResults<Profile>
     @EnvironmentObject private var l10n: Localization
     @AppStorage("appearance") private var appearance = "system"
-    @AppStorage("backgroundBlurEnabled") private var backgroundBlurEnabled = true
+    @AppStorage("backgroundBlurEnabled") private var backgroundBlurEnabled = false
 
     @State private var selection: SidebarItem = .profiles
     @State private var selectedProfileID: UUID?
@@ -3534,7 +3534,7 @@ struct SettingsView: View {
     @FetchRequest private var settings: FetchedResults<AppSettings>
     @EnvironmentObject private var l10n: Localization
     @AppStorage("appearance") private var appearance = "system"
-    @AppStorage("backgroundBlurEnabled") private var backgroundBlurEnabled = true
+    @AppStorage("backgroundBlurEnabled") private var backgroundBlurEnabled = false
     @State private var retention = 30
     @State private var defaultView = EntryMode.list.rawValue
     @State private var helperStatus = ""
