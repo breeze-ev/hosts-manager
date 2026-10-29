@@ -2,7 +2,7 @@
 
 [English](CHANGELOG.en.md)
 
-## Unreleased
+## 1.0.1 - 2026-10-29
 
 ### 变更
 
