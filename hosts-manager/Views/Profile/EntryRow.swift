@@ -90,27 +90,29 @@ struct EntryRow: View {
 
             flagBadge
 
-            RowIconButton(systemName: "pencil", help: l10n.s("编辑", "Edit")) {
-                beginEdit()
-            }
-            .disabled(entry.isSystem)
+            HStack(spacing: 2) {
+                RowIconButton(systemName: "pencil", help: l10n.s("编辑", "Edit")) {
+                    beginEdit()
+                }
+                .disabled(entry.isSystem)
 
-            RowIconButton(systemName: "trash", help: l10n.s("删除", "Delete")) {
-                showDeleteConfirm = true
-            }
-            .disabled(entry.isSystem)
-            .popover(isPresented: $showDeleteConfirm, arrowEdge: .bottom) {
-                ConfirmPopover(
-                    title: l10n.s("删除此条目？", "Delete this entry?"),
-                    message: l10n.s("此操作无法撤销。", "This action cannot be undone."),
-                    cancelTitle: l10n.s("取消", "Cancel"),
-                    confirmTitle: l10n.s("删除", "Delete"),
-                    onCancel: { showDeleteConfirm = false },
-                    onConfirm: {
-                        showDeleteConfirm = false
-                        delete()
-                    }
-                )
+                RowIconButton(systemName: "trash", help: l10n.s("删除", "Delete")) {
+                    showDeleteConfirm = true
+                }
+                .disabled(entry.isSystem)
+                .popover(isPresented: $showDeleteConfirm, arrowEdge: .bottom) {
+                    ConfirmPopover(
+                        title: l10n.s("删除此条目？", "Delete this entry?"),
+                        message: l10n.s("此操作无法撤销。", "This action cannot be undone."),
+                        cancelTitle: l10n.s("取消", "Cancel"),
+                        confirmTitle: l10n.s("删除", "Delete"),
+                        onCancel: { showDeleteConfirm = false },
+                        onConfirm: {
+                            showDeleteConfirm = false
+                            delete()
+                        }
+                    )
+                }
             }
         }
     }
