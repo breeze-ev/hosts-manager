@@ -88,6 +88,10 @@ nonisolated func localizedBackupNote(_ note: String?, isEnglish: Bool) -> String
         return isEnglish ? "Auto backup before disabling the active profile" : "停用当前配置前自动备份"
     case "列表编辑后实时应用", "Real-time apply after list edit":
         return isEnglish ? "Real-time apply after list edit" : "列表编辑后实时应用"
+    case "重新同步配置前自动备份", "Auto backup before resynchronizing profiles":
+        return isEnglish
+            ? "Auto backup before resynchronizing profiles"
+            : "重新同步配置前自动备份"
     case "还原备份前自动备份", "Auto backup before restore":
         return isEnglish ? "Auto backup before restore" : "还原备份前自动备份"
     default:

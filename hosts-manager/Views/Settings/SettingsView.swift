@@ -11,7 +11,7 @@ struct SettingsView: View {
     @AppStorage("backgroundBlurEnabled") private var backgroundBlurEnabled = false
     @State private var retention = 30
     @State private var defaultView = EntryMode.list.rawValue
-    @State private var helperStatus = ""
+    @State private var helperStatus = HostsHelperClient.status
     @State private var installMessage: String?
     @State private var settingsError: String?
     init() {
@@ -81,7 +81,7 @@ struct SettingsView: View {
     }
 
     private func refreshHelperStatus() {
-        helperStatus = HostsHelperClient.statusLabel(isEnglish: l10n.isEnglish)
+        helperStatus = HostsHelperClient.status
     }
 
     private var preferencesSection: some View {
@@ -134,7 +134,10 @@ struct SettingsView: View {
                 .foregroundStyle(.blue)
                 .padding(.top, 1)
             VStack(alignment: .leading, spacing: 6) {
-                Text(l10n.s("后台写入助手：\(helperStatus)", "Background Writer Helper: \(helperStatus)"))
+                Text(l10n.s(
+                    "后台写入助手：\(helperStatusLabel)",
+                    "Background Writer Helper: \(helperStatusLabel)"
+                ))
                     .font(.system(size: 12.5))
                     .foregroundStyle(.secondary)
                 Text(l10n.s(
@@ -169,6 +172,13 @@ struct SettingsView: View {
         }
         .padding(12)
         .detailCard()
+    }
+
+    private var helperStatusLabel: String {
+        HostsHelperClient.statusLabel(
+            for: helperStatus,
+            isEnglish: l10n.isEnglish
+        )
     }
 
     private var updateSection: some View {

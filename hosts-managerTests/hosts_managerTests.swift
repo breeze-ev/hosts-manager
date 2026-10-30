@@ -1,6 +1,7 @@
 import Testing
 import Foundation
 import CoreData
+import ServiceManagement
 @testable import hosts_manager
 
 @MainActor
@@ -520,6 +521,25 @@ struct HelperContractTests {
         #expect(requirement.contains("personal.hosts-manager"))
         #expect(requirement.contains("Y724PV6L7L"))
         #expect(requirement.contains("anchor apple generic"))
+    }
+
+    @Test func statusLabelsFollowInterfaceLanguage() {
+        #expect(
+            HostsHelperClient.statusLabel(for: .enabled, isEnglish: true)
+                == "Enabled"
+        )
+        #expect(
+            HostsHelperClient.statusLabel(for: .enabled, isEnglish: false)
+                == "已启用"
+        )
+        #expect(
+            HostsHelperClient.statusLabel(for: .requiresApproval, isEnglish: true)
+                == "Not enabled (pending approval)"
+        )
+        #expect(
+            HostsHelperClient.statusLabel(for: .notRegistered, isEnglish: false)
+                == "未启用"
+        )
     }
 }
 
@@ -1186,10 +1206,20 @@ struct PersistenceTests {
     @Test func backupNotesLocalize() {
         #expect(localizedBackupNote("启用配置前自动备份", isEnglish: true) == "Auto backup before enabling profile")
         #expect(localizedBackupNote("Auto backup before enabling profile", isEnglish: false) == "启用配置前自动备份")
+        #expect(localizedBackupNote("停用当前配置前自动备份", isEnglish: true) == "Auto backup before disabling the active profile")
+        #expect(localizedBackupNote("Auto backup before disabling the active profile", isEnglish: false) == "停用当前配置前自动备份")
+        #expect(localizedBackupNote("列表编辑后实时应用", isEnglish: true) == "Real-time apply after list edit")
+        #expect(localizedBackupNote("Real-time apply after list edit", isEnglish: false) == "列表编辑后实时应用")
+        #expect(localizedBackupNote("重新同步配置前自动备份", isEnglish: true) == "Auto backup before resynchronizing profiles")
+        #expect(localizedBackupNote("Auto backup before resynchronizing profiles", isEnglish: false) == "重新同步配置前自动备份")
+        #expect(localizedBackupNote("还原备份前自动备份", isEnglish: true) == "Auto backup before restore")
+        #expect(localizedBackupNote("Auto backup before restore", isEnglish: false) == "还原备份前自动备份")
         #expect(localizedBackupNote("应用“默认”前自动备份", isEnglish: true) == "Auto backup before applying “Default”")
         #expect(localizedBackupNote("Auto backup before applying “Default”", isEnglish: false) == "应用“默认”前自动备份")
         #expect(localizedBackupNote("导入 2026-10-24 1000", isEnglish: true) == "Imported 2026-10-24 1000")
         #expect(localizedBackupNote("Imported 2026-10-24 1000", isEnglish: false) == "导入 2026-10-24 1000")
+        #expect(localizedBackupNote("从备份恢复 2026-10-24 1000", isEnglish: true) == "Restored from backup 2026-10-24 1000")
+        #expect(localizedBackupNote("Restored from backup 2026-10-24 1000", isEnglish: false) == "从备份恢复 2026-10-24 1000")
     }
 
     @Test func generatedProfileNamesLocalize() {
@@ -1205,24 +1235,20 @@ struct PersistenceTests {
 }
 
 struct LocalizationPreferenceTests {
-    @Test func appleLanguagesFollowLanguagePreference() {
-        let defaults = UserDefaults.standard
-        let previous = defaults.array(forKey: "AppleLanguages") as? [String]
-        defer {
-            if let previous {
-                defaults.set(previous, forKey: "AppleLanguages")
-            } else {
-                defaults.removeObject(forKey: "AppleLanguages")
-            }
-        }
+    @Test func appleLanguagesFollowLanguagePreference() throws {
+        let suiteName = "LocalizationPreferenceTests-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
 
-        LocalizationPreference.applyAppleLanguages(for: "zh")
+        LocalizationPreference.applyAppleLanguages(for: "zh", defaults: defaults)
         #expect(defaults.array(forKey: "AppleLanguages") as? [String] == ["zh-Hans"])
 
-        LocalizationPreference.applyAppleLanguages(for: "en")
+        LocalizationPreference.applyAppleLanguages(for: "en", defaults: defaults)
         #expect(defaults.array(forKey: "AppleLanguages") as? [String] == ["en"])
 
-        LocalizationPreference.applyAppleLanguages(for: "system")
-        #expect(defaults.array(forKey: "AppleLanguages") as? [String] == previous)
+        LocalizationPreference.applyAppleLanguages(for: "system", defaults: defaults)
+        #expect(
+            defaults.persistentDomain(forName: suiteName)?["AppleLanguages"] == nil
+        )
     }
 }

@@ -26,8 +26,10 @@ nonisolated enum LocalizationPreference {
         }
     }
 
-    static func applyAppleLanguages(for language: String) {
-        let defaults = UserDefaults.standard
+    static func applyAppleLanguages(
+        for language: String,
+        defaults: UserDefaults = .standard
+    ) {
         switch language {
         case "zh":
             defaults.set(["zh-Hans"], forKey: "AppleLanguages")

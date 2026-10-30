@@ -30,6 +30,13 @@ enum HostsHelperClient {
     }
 
     static func statusLabel(isEnglish: Bool) -> String {
+        statusLabel(for: status, isEnglish: isEnglish)
+    }
+
+    nonisolated static func statusLabel(
+        for status: SMAppService.Status,
+        isEnglish: Bool
+    ) -> String {
         switch status {
         case .enabled:
             return isEnglish ? "Enabled" : "已启用"
