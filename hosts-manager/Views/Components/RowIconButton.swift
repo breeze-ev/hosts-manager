@@ -10,7 +10,7 @@ struct RowIconButton: View {
             Image(systemName: systemName)
                 .font(.system(size: 12, weight: .medium))
                 .foregroundStyle(.secondary)
-                .frame(width: 24, height: 24)
+                .frame(width: 22, height: 22)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -20,7 +20,7 @@ struct RowIconButton: View {
 }
 
 #Preview("Row Icon Button") {
-    HStack(spacing: 0) {
+    HStack(spacing: 10) {
         RowIconButton(systemName: "pencil", help: "编辑") {}
         RowIconButton(systemName: "trash", help: "删除") {}
     }
