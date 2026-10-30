@@ -58,3 +58,8 @@ struct StoreRecoveryView: View {
         }
     }
 }
+
+#Preview("Store Recovery") {
+    StoreRecoveryView(persistenceController: PersistenceController.preview)
+        .environmentObject(Localization())
+}

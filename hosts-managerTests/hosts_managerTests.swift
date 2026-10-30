@@ -3,6 +3,19 @@ import Foundation
 import CoreData
 @testable import hosts_manager
 
+@MainActor
+struct PersistenceModelTests {
+    @Test func hostnamesUseSecureUnarchiveTransformer() throws {
+        let entity = try #require(PersistenceController.model.entitiesByName["HostEntry"])
+        let attribute = try #require(entity.attributesByName["hostnames"])
+
+        #expect(
+            attribute.valueTransformerName ==
+                NSValueTransformerName.secureUnarchiveFromDataTransformerName.rawValue
+        )
+    }
+}
+
 struct HostsParserTests {
     @Test func parsesCommentsReservedAndIPv6() {
         let text = """
