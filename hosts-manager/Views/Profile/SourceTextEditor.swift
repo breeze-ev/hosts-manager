@@ -271,7 +271,6 @@ struct SourceTextEditor: NSViewRepresentable {
         scrollView.verticalRulerView = LineNumberRulerView(scrollView: scrollView, textView: textView)
         proxy.textView = textView
         Self.applyHighlighting(to: textView)
-        proxy.refreshStatus()
         scrollView.onScrollOffsetChange = onScrollOffsetChange
         DispatchQueue.main.async {
             scrollView.reportScrollOffset()
@@ -286,8 +285,6 @@ struct SourceTextEditor: NSViewRepresentable {
         if changed {
             tv.string = text
             Self.applyHighlighting(to: tv)
-            proxy.refreshStatus()
-            proxy.reapplyFindHighlight()
         }
         proxy.textView = tv
     }

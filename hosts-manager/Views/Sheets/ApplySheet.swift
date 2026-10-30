@@ -1,7 +1,5 @@
-import SwiftUI
 import CoreData
-
-// MARK: - Apply flow
+import SwiftUI
 
 struct ApplySheet: View {
     @ObservedObject var profile: Profile
@@ -12,13 +10,19 @@ struct ApplySheet: View {
     @EnvironmentObject private var l10n: Localization
     @State private var phase: Phase = .preview
     @State private var writeError: String?
-    @State private var baselineContent: String?
+    @State private var baselineContent = ""
     @State private var liveContent = ""
+    @State private var resultBaselineContent: String?
+    @State private var resultTargetContent: String?
     @State private var removeDuplicatesOnApply = false
     @StateObject private var writeCoordinator = HostsWriteCoordinator.shared
     @FetchRequest(sortDescriptors: []) private var allProfiles: FetchedResults<Profile>
 
-    enum Phase { case preview, writing, done }
+    enum Phase {
+        case preview
+        case writing
+        case done
+    }
 
     init(
         profile: Profile,
@@ -33,17 +37,31 @@ struct ApplySheet: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             switch phase {
-            case .preview: preview
-            case .writing: writing
-            case .done: result
+            case .preview:
+                ApplyPreviewView(
+                    profileName: profile.localizedName(isEnglish: l10n.isEnglish),
+                    plan: plan,
+                    baselineContent: baselineContent,
+                    onRemoveDuplicates: { removeDuplicatesOnApply = true },
+                    onCancel: { dismiss() },
+                    onConfirm: startWrite
+                )
+            case .writing:
+                ApplyProgressView()
+            case .done:
+                ApplyResultView(
+                    profileName: profile.localizedName(isEnglish: l10n.isEnglish),
+                    errorMessage: writeError,
+                    baselineContent: resultBaselineContent ?? baselineContent,
+                    targetContent: resultTargetContent ?? plan.targetContent,
+                    onDone: { dismiss() }
+                )
             }
         }
         .frame(width: 620, height: 500)
         .padding(22)
         .buttonBorderShape(.capsule)
-        .onAppear {
-            captureBaselineIfNeeded()
-        }
+        .onAppear(perform: captureBaselineIfNeeded)
         .onReceive(NotificationCenter.default.publisher(for: .hostsContentChanged)) { _ in
             if phase == .preview {
                 refreshBaseline()
@@ -57,310 +75,20 @@ struct ApplySheet: View {
         }
     }
 
-    private var target: String {
-        mergedContent(entries: parsed, liveContent: liveContent)
-    }
-
-    private var ownedHostnames: Set<String> {
-        Set(
-            allProfiles
-                .filter { !$0.isSystem }
-                .flatMap(\.sortedEntries)
-                .flatMap(\.hostList)
-                .map { $0.lowercased() }
-        ).union(managedHostnamesBaseline)
-    }
-
-    private var managedHostnamesAfterWrite: Set<String> {
-        let otherHostnames = allProfiles
-            .filter {
-                !$0.isSystem && $0.objectID != profile.objectID
-            }
-            .flatMap(\.sortedEntries)
-            .flatMap(\.hostList)
-        let targetHostnames = draftText.map {
-            HostsParser.parse($0).flatMap(\.hostnames)
-        } ?? profile.sortedEntries.flatMap(\.hostList)
-        return Set(
-            (otherHostnames + targetHostnames).map { $0.lowercased() }
-        )
-    }
-
-    private func mergedContent(
-        entries: [ParsedHostEntry],
-        liveContent: String
-    ) -> String {
-        HostsContentMerger.merge(
+    private var plan: ApplyPlan {
+        ApplyPlanBuilder.makePlan(
+            profile: profile,
+            allProfiles: Array(allProfiles),
+            draftText: draftText,
+            managedHostnamesBaseline: managedHostnamesBaseline,
             liveContent: liveContent,
-            managedEntries: entries,
-            ownedHostnames: ownedHostnames
+            removeDuplicates: removeDuplicatesOnApply,
+            isEnglish: l10n.isEnglish
         )
-    }
-
-    private var exactDuplicateObjectIDs: Set<NSManagedObjectID> {
-        var seen = Set<String>()
-        var duplicates = Set<NSManagedObjectID>()
-        for entry in (otherActiveProfiles + [profile]).flatMap(\.sortedEntries) {
-            let key = entryKey(entry)
-            if !seen.insert(key).inserted {
-                duplicates.insert(entry.objectID)
-            }
-        }
-        return duplicates
-    }
-
-    private func entryKey(_ entry: HostEntry) -> String {
-        (entry.ip ?? "") + "|" + entry.hostList.joined(separator: ",")
-    }
-
-    private var parsed: [ParsedHostEntry] {
-        // 应用时把其它已启用配置的条目一并合并，预览和冲突检查都以并集为准。
-        let profiles = otherActiveProfiles + [profile]
-        let duplicateToDelete = removeDuplicatesOnApply
-            ? exactDuplicateObjectIDs
-            : Set<NSManagedObjectID>()
-        return profiles.flatMap { p in
-            p.sortedEntries.map {
-                if duplicateToDelete.contains($0.objectID) {
-                    return nil
-                }
-                return ParsedHostEntry(
-                    ip: $0.ip ?? "",
-                    hostnames: $0.hostList,
-                    desc: localizedSeedDescription($0.desc, isEnglish: l10n.isEnglish),
-                    isEnabled: $0.isEnabled,
-                    isSystem: $0.isSystem
-                )
-            }
-        }.compactMap { $0 }
-    }
-
-    private func parsedForWrite(
-        targets: [Profile],
-        draftEntries: [ParsedHostEntry]?,
-        duplicateObjectIDs: Set<NSManagedObjectID>
-    ) -> [ParsedHostEntry] {
-        let profiles = targets.filter { $0.id != profile.id } + [profile]
-        return profiles.flatMap { target in
-            if target.id == profile.id, let draftEntries {
-                return draftEntries
-            }
-            return target.sortedEntries.compactMap { entry -> ParsedHostEntry? in
-                guard !duplicateObjectIDs.contains(entry.objectID) else {
-                    return nil
-                }
-                return ParsedHostEntry(
-                    ip: entry.ip ?? "",
-                    hostnames: entry.hostList,
-                    desc: localizedSeedDescription(
-                        entry.desc,
-                        isEnglish: l10n.isEnglish
-                    ),
-                    isEnabled: entry.isEnabled,
-                    isSystem: entry.isSystem
-                )
-            }
-        }
-    }
-
-    private var validationIssues: [HostIssue] {
-        HostValidator.issues(entries: parsed.filter(\.isEnabled))
-    }
-
-    private var conflictIssues: [HostIssue] {
-        validationIssues.filter { $0.kind == .conflict }
-    }
-
-    private var duplicateIssues: [HostIssue] {
-        validationIssues.filter { $0.kind == .duplicate }
-    }
-
-    private var hasExactDuplicatesInTargets: Bool {
-        guard !removeDuplicatesOnApply else { return false }
-        var seen = Set<String>()
-        return (otherActiveProfiles + [profile]).flatMap(\.sortedEntries).contains { entry in
-            let key = (entry.ip ?? "") + "|" + entry.hostList.joined(separator: ",")
-            return !seen.insert(key).inserted
-        }
-    }
-
-    private var preview: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text(l10n.s(
-                "应用“\(profile.localizedName(isEnglish: l10n.isEnglish))”",
-                "Apply “\(profile.localizedName(isEnglish: l10n.isEnglish))”"
-            ))
-                .font(.system(size: 20, weight: .bold))
-            HStack(spacing: 8) {
-                Image(systemName: "clock.arrow.circlepath")
-                    .foregroundStyle(.green)
-                Text(l10n.s("写入前将自动备份当前 /etc/hosts 到备份目录，可随时还原。", "The current /etc/hosts will be backed up before writing and can be restored anytime."))
-                    .font(.system(size: 12.5))
-                    .foregroundStyle(.secondary)
-            }
-            .padding(11)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(.green.opacity(0.12)))
-            .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(.green.opacity(0.3)))
-
-            if !validationIssues.isEmpty {
-                VStack(alignment: .leading, spacing: 6) {
-                    Label(
-                        conflictIssues.isEmpty
-                            ? l10n.s("存在完全重复条目", "Exact duplicates found")
-                            : l10n.s("存在主机名冲突", "Hostname conflict found"),
-                        systemImage: "exclamationmark.triangle.fill"
-                    )
-                    .font(.system(size: 12.5, weight: .semibold))
-                    .foregroundStyle(conflictIssues.isEmpty ? .green : .orange)
-                    Text(validationIssues.map(\.hostname).joined(separator: ", "))
-                        .font(.system(.caption, design: .monospaced))
-                        .foregroundStyle(.secondary)
-                    if !conflictIssues.isEmpty {
-                        Text(l10n.s(
-                            "这些主机名分别指向了不同 IP；修复前不会写入系统。",
-                            "These hostnames point to different IPs; nothing will be written until they are fixed."
-                        ))
-                        .font(.system(size: 12))
-                        .foregroundStyle(.secondary)
-                    } else if !duplicateIssues.isEmpty {
-                        Text(l10n.s(
-                            "完全重复条目会在写入时自动去重，不会阻止应用。",
-                            "Exact duplicates are removed automatically when applying and do not block the write."
-                        ))
-                        .font(.system(size: 12))
-                        .foregroundStyle(.secondary)
-                    }
-                    if hasExactDuplicatesInTargets {
-                        Button(l10n.s("清理应用范围内的完全重复条目", "Remove Exact Duplicates in Applied Profiles")) {
-                            removeExactDuplicates()
-                        }
-                        .buttonStyle(.glass)
-                    }
-                }
-                .padding(11)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(RoundedRectangle(cornerRadius: 12).fill(.orange.opacity(0.1)))
-            }
-
-            diffView
-            Spacer()
-            HStack {
-                Spacer()
-                Button(l10n.s("取消", "Cancel")) { dismiss() }.buttonStyle(.glass)
-                Button(l10n.s("确认应用", "Confirm Apply")) { startWrite() }.buttonStyle(.glassProminent)
-                    .disabled(!conflictIssues.isEmpty)
-                    .accessibilityIdentifier("confirm-apply-button")
-            }
-        }
-    }
-
-    private var writing: some View {
-        VStack(spacing: 16) {
-            Spacer()
-            ProgressView().controlSize(.large)
-            Text(l10n.s("正在写入 /etc/hosts…", "Writing to /etc/hosts…"))
-                .font(.system(size: 14, weight: .semibold))
-                .foregroundStyle(.secondary)
-            Spacer()
-        }
-        .frame(maxWidth: .infinity)
-    }
-
-    private var result: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            if writeError == nil {
-                HStack(spacing: 10) {
-                    Image(systemName: "checkmark.circle.fill")
-                        .font(.system(size: 22))
-                        .foregroundStyle(.green)
-                    Text(l10n.s(
-                        "已应用“\(profile.localizedName(isEnglish: l10n.isEnglish))”到 /etc/hosts",
-                        "Applied “\(profile.localizedName(isEnglish: l10n.isEnglish))” to /etc/hosts"
-                    ))
-                        .font(.system(size: 15, weight: .semibold))
-                }
-                Text(l10n.s("备份已保存到备份目录。", "A backup was saved to the backup folder."))
-                    .font(.system(size: 12.5))
-                    .foregroundStyle(.secondary)
-            } else {
-                HStack(spacing: 10) {
-                    Image(systemName: "xmark.octagon.fill")
-                        .font(.system(size: 22))
-                        .foregroundStyle(.red)
-                    Text(l10n.s("写入失败", "Write failed"))
-                        .font(.system(size: 15, weight: .semibold))
-                }
-                Text(writeError ?? "")
-                    .font(.system(size: 12.5))
-                    .foregroundStyle(.secondary)
-            }
-            diffView
-            Spacer()
-            HStack {
-                Spacer()
-                Button(l10n.s("完成", "Done")) { dismiss() }.buttonStyle(.glassProminent)
-            }
-        }
-    }
-
-    private var diffView: some View {
-        let before = baselineContent
-            ?? HostsParser.serialize(HostsParser.parse(liveContent))
-        let after = target
-        let diff = HostsLineDiff.compare(before: before, after: after)
-        let displayLimit = 300
-        let removed = Array(diff.removed.prefix(displayLimit))
-        let added = Array(diff.added.prefix(displayLimit))
-        let hiddenCount = max(0, diff.removed.count - removed.count)
-            + max(0, diff.added.count - added.count)
-        return VStack(alignment: .leading, spacing: 4) {
-            Text(diffTitle)
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(.secondary)
-            ScrollView {
-                if diff.isEmpty {
-                    Text(l10n.s("内容无变化", "No changes"))
-                        .font(.system(size: 12.5))
-                        .foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                } else {
-                    VStack(alignment: .leading, spacing: 2) {
-                        ForEach(Array(removed.enumerated()), id: \.offset) { _, line in
-                            Text("− \(line)")
-                                .foregroundStyle(.red)
-                        }
-                        ForEach(Array(added.enumerated()), id: \.offset) { _, line in
-                            Text("+ \(line)")
-                                .foregroundStyle(.green)
-                        }
-                        if hiddenCount > 0 {
-                            Text(l10n.s(
-                                "另有 \(hiddenCount) 行变更未展开。",
-                                "\(hiddenCount) additional changed lines are hidden."
-                            ))
-                            .foregroundStyle(.secondary)
-                        }
-                    }
-                    .font(.system(.caption, design: .monospaced))
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                }
-            }
-            .padding(12)
-            .frame(maxHeight: 220)
-            .background(RoundedRectangle(cornerRadius: 12, style: .continuous).fill(.ultraThinMaterial))
-        }
-    }
-
-    private var diffTitle: String {
-        guard phase == .done else { return l10n.s("预览", "Preview") }
-        return writeError == nil
-            ? l10n.s("已应用更改", "Applied changes")
-            : l10n.s("待应用更改", "Pending changes")
     }
 
     private func captureBaselineIfNeeded() {
-        if baselineContent == nil {
+        if baselineContent.isEmpty && liveContent.isEmpty {
             refreshBaseline()
         }
     }
@@ -391,45 +119,49 @@ struct ApplySheet: View {
     }
 
     private func startWrite() {
-        guard conflictIssues.isEmpty else { return }
-        // Capture the exact duplicate set that the previewed target was based
-        // on. It must not be recalculated after a background model change.
+        let approvedPlan = plan
+        guard approvedPlan.canApply else { return }
+
+        resultBaselineContent = baselineContent
+        resultTargetContent = approvedPlan.targetContent
+        let approvedDraftText = draftText
         let duplicateObjectIDs = removeDuplicatesOnApply
-            ? exactDuplicateObjectIDs
+            ? approvedPlan.exactDuplicateObjectIDs
             : []
         refreshBaseline()
         phase = .writing
+
         Task {
             do {
                 var appliedProfileIDs: [UUID] = []
-                let draftEntries = draftText.map { HostsParser.parse($0) }
+                let draftEntries = approvedDraftText.map(HostsParser.parse)
                 _ = try await writeCoordinator.perform(
                     makeContent: { liveContent in
-                        // Re-read at the queue head so a profile applied or
-                        // disabled while this sheet was open cannot be omitted.
                         guard !self.profile.isDeleted, !self.profile.isSystem else {
                             throw HostsWriteAbortedError()
                         }
                         let targets = self.otherActiveProfiles + [self.profile]
-                        let entries = self.parsedForWrite(
+                        let currentPlan = ApplyPlanBuilder.makePlan(
                             targets: targets,
-                            draftEntries: draftEntries,
-                            duplicateObjectIDs: duplicateObjectIDs
+                            profile: self.profile,
+                            allProfiles: Array(self.allProfiles),
+                            draftText: approvedDraftText,
+                            managedHostnamesBaseline: self.managedHostnamesBaseline,
+                            liveContent: liveContent,
+                            removeDuplicates: self.removeDuplicatesOnApply,
+                            forcedDuplicateObjectIDs: duplicateObjectIDs,
+                            isEnglish: self.l10n.isEnglish
                         )
-                        if HostValidator.issues(entries: entries.filter(\.isEnabled))
-                            .contains(where: { $0.kind == .conflict }) {
-                            throw HostsWriteConflictError(profileID: self.profile.id ?? UUID())
+                        guard currentPlan.canApply else {
+                            throw HostsWriteConflictError(
+                                profileID: self.profile.id ?? UUID()
+                            )
                         }
-                        appliedProfileIDs = targets.compactMap(\.id)
+                        appliedProfileIDs = currentPlan.appliedProfileIDs
                         return HostsWriteRequest(
-                            content: self.mergedContent(
-                                entries: entries,
-                                liveContent: liveContent
-                            ),
-                            appliedProfileIDs: targets.compactMap(\.id),
-                            managedHostnames: Array(
-                                self.managedHostnamesAfterWrite
-                            ).sorted()
+                            content: currentPlan.targetContent,
+                            appliedProfileIDs: currentPlan.appliedProfileIDs,
+                            managedHostnames: currentPlan.managedHostnames.sorted()
                         )
                     },
                     commit: { result in
@@ -437,50 +169,13 @@ struct ApplySheet: View {
                             result: result,
                             context: context,
                             profileName: profile.localizedName(isEnglish: l10n.isEnglish),
-                            note: l10n.s(
-                                "应用“\(profile.localizedName(isEnglish: l10n.isEnglish))”前自动备份",
-                                "Auto backup before applying “\(profile.localizedName(isEnglish: l10n.isEnglish))”"
-                            ),
+                            note: applyBackupNote,
                             appliedProfileIDs: appliedProfileIDs
                         ) {
-                            if let draftEntries,
-                               !HostsParser.entriesEquivalent(
-                                draftEntries,
-                                profile.sortedEntries.map {
-                                    ParsedHostEntry(
-                                        ip: $0.ip ?? "",
-                                        hostnames: $0.hostList,
-                                        desc: $0.desc ?? "",
-                                        isEnabled: $0.isEnabled,
-                                        isSystem: $0.isSystem
-                                    )
-                                }
-                               ) {
-                                for entry in profile.sortedEntries {
-                                    context.delete(entry)
-                                }
-                                for (index, item) in draftEntries.enumerated() {
-                                    let entry = HostEntry(context: context)
-                                    entry.id = UUID()
-                                    entry.profile = profile
-                                    entry.ip = item.ip
-                                    entry.hostnames = item.hostnames
-                                    entry.desc = item.desc
-                                    entry.isEnabled = item.isEnabled
-                                    entry.isSystem = item.isSystem
-                                    entry.sortIndex = Int64(index)
-                                    entry.createdAt = Date()
-                                }
-                                profile.updatedAt = Date()
-                            }
-                            if removeDuplicatesOnApply {
-                                removeDuplicateEntries(matching: duplicateObjectIDs)
-                            }
-                            profile.updatedAt = Date()
-                            try setAppliedProfileSelection(
-                                appliedProfileIDs,
-                                lastActivatedProfileID: profile.id,
-                                context: context
+                            try applyStateChanges(
+                                draftEntries: draftEntries,
+                                duplicateObjectIDs: duplicateObjectIDs,
+                                appliedProfileIDs: appliedProfileIDs
                             )
                         }
                     }
@@ -502,8 +197,45 @@ struct ApplySheet: View {
         }
     }
 
-    private func removeExactDuplicates() {
-        removeDuplicatesOnApply = true
+    private var applyBackupNote: String {
+        l10n.s(
+            "应用“\(profile.localizedName(isEnglish: l10n.isEnglish))”前自动备份",
+            "Auto backup before applying “\(profile.localizedName(isEnglish: l10n.isEnglish))”"
+        )
+    }
+
+    private func applyStateChanges(
+        draftEntries: [ParsedHostEntry]?,
+        duplicateObjectIDs: Set<NSManagedObjectID>,
+        appliedProfileIDs: [UUID]
+    ) throws {
+        if let draftEntries,
+           !HostsParser.entriesEquivalent(
+            draftEntries,
+            profile.sortedEntries.map {
+                ParsedHostEntry(
+                    ip: $0.ip ?? "",
+                    hostnames: $0.hostList,
+                    desc: $0.desc ?? "",
+                    isEnabled: $0.isEnabled,
+                    isSystem: $0.isSystem
+                )
+            }
+           ) {
+            ProfileRepository(context: context).replaceEntries(
+                of: profile,
+                with: draftEntries
+            )
+        }
+        if removeDuplicatesOnApply {
+            removeDuplicateEntries(matching: duplicateObjectIDs)
+        }
+        profile.updatedAt = Date()
+        try setAppliedProfileSelection(
+            appliedProfileIDs,
+            lastActivatedProfileID: profile.id,
+            context: context
+        )
     }
 
     private func removeDuplicateEntries(matching objectIDs: Set<NSManagedObjectID>) {
@@ -552,7 +284,7 @@ struct ApplySheet: View {
         }
         if let writeError = error as? HostsWriteError {
             switch writeError {
-            case .invalidContent(_):
+            case .invalidContent:
                 return l10n.s("内容无效，无法写入。", "The hosts content is invalid.")
             case .authorizationFailed:
                 return l10n.s("后台写入助手拒绝了授权。", "The background writer helper rejected authorization.")

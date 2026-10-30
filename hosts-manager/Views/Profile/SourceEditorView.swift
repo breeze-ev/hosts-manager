@@ -117,8 +117,8 @@ struct SourceEditorView: View {
                     .buttonStyle(.glass)
                 }
                 .font(.system(size: 12))
-                .onChange(of: findText) { _, newValue in
-                    proxy.prepareFind(query: newValue)
+                .task(id: findText) {
+                    proxy.prepareFind(query: findText)
                 }
             }
 
@@ -151,16 +151,15 @@ struct SourceEditorView: View {
             .font(.system(.caption, design: .monospaced))
             .foregroundStyle(.secondary)
         }
-        .onAppear {
+        // NSViewRepresentable installs the text view during the SwiftUI update.
+        // Defer observable status/find changes until that transaction finishes.
+        .task(id: text) {
             validate()
             proxy.refreshStatus()
+            proxy.reapplyFindHighlight()
+        }
+        .task(id: toolbarQuery) {
             proxy.applyFindHighlight(query: toolbarQuery)
-        }
-        .onChange(of: toolbarQuery) { _, newValue in
-            proxy.applyFindHighlight(query: newValue)
-        }
-        .onChange(of: text) { _, _ in
-            validate()
         }
         .onReceive(NotificationCenter.default.publisher(for: .sourceFind)) { _ in
             showFind = true
