@@ -65,7 +65,7 @@ struct EntriesListView: View {
                     }
                     ForEach(Array(filtered.enumerated()), id: \.element.id) { index, entry in
                         #if DEBUG
-                        if isRunningInXcodePreview {
+                        if PreviewEnvironment.isRunning {
                             // See NavigationSidebarView: work around the macOS
                             // Preview List/ForEach custom-row crash.
                             AnyView(EmptyView())

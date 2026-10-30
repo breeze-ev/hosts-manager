@@ -13,6 +13,7 @@ struct ApplySheet: View {
     @State private var phase: Phase = .preview
     @State private var writeError: String?
     @State private var baselineContent: String?
+    @State private var liveContent = ""
     @State private var removeDuplicatesOnApply = false
     @StateObject private var writeCoordinator = HostsWriteCoordinator.shared
     @FetchRequest(sortDescriptors: []) private var allProfiles: FetchedResults<Profile>
@@ -57,7 +58,7 @@ struct ApplySheet: View {
     }
 
     private var target: String {
-        mergedContent(entries: parsed, liveContent: HostsWriter.currentContent())
+        mergedContent(entries: parsed, liveContent: liveContent)
     }
 
     private var ownedHostnames: Set<String> {
@@ -304,9 +305,15 @@ struct ApplySheet: View {
     }
 
     private var diffView: some View {
-        let before = baselineContent ?? normalizedCurrentHosts()
+        let before = baselineContent
+            ?? HostsParser.serialize(HostsParser.parse(liveContent))
         let after = target
-        let diff = lineDiff(before, after)
+        let diff = HostsLineDiff.compare(before: before, after: after)
+        let displayLimit = 300
+        let removed = Array(diff.removed.prefix(displayLimit))
+        let added = Array(diff.added.prefix(displayLimit))
+        let hiddenCount = max(0, diff.removed.count - removed.count)
+            + max(0, diff.added.count - added.count)
         return VStack(alignment: .leading, spacing: 4) {
             Text(diffTitle)
                 .font(.system(size: 12, weight: .semibold))
@@ -319,10 +326,20 @@ struct ApplySheet: View {
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
                     VStack(alignment: .leading, spacing: 2) {
-                        ForEach(diff.indices, id: \.self) { i in
-                            let item = diff[i]
-                            Text(item.kind == 0 ? "− \(item.line)" : "+ \(item.line)")
-                                .foregroundStyle(item.kind == 0 ? .red : .green)
+                        ForEach(Array(removed.enumerated()), id: \.offset) { _, line in
+                            Text("− \(line)")
+                                .foregroundStyle(.red)
+                        }
+                        ForEach(Array(added.enumerated()), id: \.offset) { _, line in
+                            Text("+ \(line)")
+                                .foregroundStyle(.green)
+                        }
+                        if hiddenCount > 0 {
+                            Text(l10n.s(
+                                "另有 \(hiddenCount) 行变更未展开。",
+                                "\(hiddenCount) additional changed lines are hidden."
+                            ))
+                            .foregroundStyle(.secondary)
                         }
                     }
                     .font(.system(.caption, design: .monospaced))
@@ -342,10 +359,6 @@ struct ApplySheet: View {
             : l10n.s("待应用更改", "Pending changes")
     }
 
-    private func normalizedCurrentHosts() -> String {
-        HostsParser.serialize(HostsParser.parse(HostsWriter.currentContent()))
-    }
-
     private func captureBaselineIfNeeded() {
         if baselineContent == nil {
             refreshBaseline()
@@ -353,8 +366,8 @@ struct ApplySheet: View {
     }
 
     private func refreshBaseline() {
-        let current = normalizedCurrentHosts()
-        baselineContent = current
+        liveContent = HostsWriter.currentContent()
+        baselineContent = HostsParser.serialize(HostsParser.parse(liveContent))
         guard let draftText else { return }
         let draftEntries = HostsParser.parse(draftText)
         if HostsParser.entriesEquivalent(draftEntries, parsedWithoutDraft()) {
@@ -375,37 +388,6 @@ struct ApplySheet: View {
                 isSystem: $0.isSystem
             )
         }
-    }
-
-    private struct DiffLine {
-        let kind: Int // 0 = removed, 1 = added
-        let line: String
-    }
-
-    private func lineDiff(_ before: String, _ after: String) -> [DiffLine] {
-        let b = before.components(separatedBy: "\n")
-        let a = after.components(separatedBy: "\n")
-        let m = b.count, n = a.count
-        var dp = Array(repeating: Array(repeating: 0, count: n + 1), count: m + 1)
-        for i in stride(from: m - 1, through: 0, by: -1) {
-            for j in stride(from: n - 1, through: 0, by: -1) {
-                dp[i][j] = b[i] == a[j] ? dp[i + 1][j + 1] + 1 : max(dp[i + 1][j], dp[i][j + 1])
-            }
-        }
-        var result: [DiffLine] = []
-        var i = 0, j = 0
-        while i < m && j < n {
-            if b[i] == a[j] {
-                i += 1; j += 1
-            } else if dp[i + 1][j] >= dp[i][j + 1] {
-                result.append(DiffLine(kind: 0, line: b[i])); i += 1
-            } else {
-                result.append(DiffLine(kind: 1, line: a[j])); j += 1
-            }
-        }
-        while i < m { result.append(DiffLine(kind: 0, line: b[i])); i += 1 }
-        while j < n { result.append(DiffLine(kind: 1, line: a[j])); j += 1 }
-        return result
     }
 
     private func startWrite() {
@@ -544,6 +526,12 @@ struct ApplySheet: View {
     }
 
     private func localizedError(_ error: Error) -> String {
+        if error is HostsStateRecoveryRequiredError {
+            return l10n.s(
+                "配置状态尚未恢复，写入已暂停。请先完成恢复操作。",
+                "Profile state recovery is pending and writes are paused. Complete recovery first."
+            )
+        }
         if error is HostsWriteConflictError {
             return l10n.s(
                 "配置与其它已启用配置存在主机名冲突，未写入系统。",

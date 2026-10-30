@@ -1,60 +1,6 @@
 import Combine
 import Foundation
 
-extension Notification.Name {
-    static let hostsContentChanged = Notification.Name("hostsManager.hostsContentChanged")
-}
-
-protocol HostsFileAccess {
-    func read() throws -> String
-    func write(_ content: String) async throws
-}
-
-struct HostsWriteResult: Equatable, Sendable {
-    let content: String
-    let backupURL: URL
-}
-
-struct HostsWriteRequest: Sendable {
-    let content: String
-    /// Exact profile selection represented by `content`. Persisting this before
-    /// the Core Data commit makes an interrupted write recoverable after relaunch.
-    let appliedProfileIDs: [UUID]?
-    /// Hostnames whose mappings were generated from profile definitions. Keeping
-    /// the previous set lets a later edit remove renamed or deleted profile rows.
-    let managedHostnames: [String]
-
-    init(
-        content: String,
-        appliedProfileIDs: [UUID]? = nil,
-        managedHostnames: [String] = []
-    ) {
-        self.content = content
-        self.appliedProfileIDs = appliedProfileIDs
-        self.managedHostnames = managedHostnames
-    }
-}
-
-/// The file was written, but the corresponding Core Data state could not be saved.
-struct HostsWriteCommitError: Error {
-    let result: HostsWriteResult
-    let underlying: Error
-}
-
-struct HostsWriteStateReconciliationError: Error {}
-
-struct HostsStateRecoveryRequiredError: Error {}
-
-struct SystemHostsFileAccess: HostsFileAccess {
-    func read() throws -> String {
-        try HostsWriter.readContent()
-    }
-
-    func write(_ content: String) async throws {
-        try await HostsWriter.write(content)
-    }
-}
-
 /// 串行化所有对 /etc/hosts 的写入。
 ///
 /// 旧实现用一个 `isWriting` 标志让并发请求直接失败，由配置开关、应用面板、
@@ -65,7 +11,10 @@ struct SystemHostsFileAccess: HostsFileAccess {
 /// 在下一次写入开始前完成状态提交，因此后一个请求能看到前一个请求提交后的配置状态。
 @MainActor
 final class HostsWriteCoordinator: ObservableObject {
-    static let shared = HostsWriteCoordinator(access: SystemHostsFileAccess())
+    static let shared = HostsWriteCoordinator(
+        access: SystemHostsFileAccess(),
+        requiresStateRecovery: persistedStateRecoveryIsRequired()
+    )
 
     @Published private(set) var isWriting = false
 
@@ -76,11 +25,24 @@ final class HostsWriteCoordinator: ObservableObject {
     private var pendingOperationCount = 0
     /// Writes stay blocked only when a successful file write could not commit
     /// its matching Core Data state. External file edits never set this flag.
-    private var requiresStateRecovery = false
+    private(set) var requiresStateRecovery: Bool
 
-    init(access: any HostsFileAccess, backupDirectory: URL? = nil) {
+    init(
+        access: any HostsFileAccess,
+        backupDirectory: URL? = nil,
+        requiresStateRecovery: Bool = false
+    ) {
         self.access = access
         self.backupDirectory = backupDirectory
+        self.requiresStateRecovery = requiresStateRecovery
+    }
+
+    static func persistedStateRecoveryIsRequired(
+        from defaults: UserDefaults = .standard
+    ) -> Bool {
+        HostsRecoveryPlanner.resolve(
+            baseline: HostsReconciliationBaselineStore.load(from: defaults)
+        ) != nil
     }
 
     func write(_ content: String) async throws -> HostsWriteResult {

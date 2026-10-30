@@ -9,7 +9,7 @@ struct BackupRow: View {
     @State private var showDeleteConfirm = false
 
     var body: some View {
-        HStack(spacing: 10) {
+        HStack(spacing: 2) {
             Image(systemName: "doc")
                 .foregroundStyle(.blue)
             VStack(alignment: .leading, spacing: 2) {

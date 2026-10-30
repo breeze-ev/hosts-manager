@@ -1,373 +1,254 @@
 # AGENTS.md
 
-本文件定义项目的 Swift 开发规范。所有 AI Agent、开发人员在新增、修改代码时必须遵守。
+本文件定义 Hosts Manager 的 Swift 开发规范。所有 AI Agent 和开发人员在新增、修改代码时必须遵守。
 
-如果现有代码与本规范冲突，优先按照本规范逐步整理，但不得擅自破坏现有功能。
+规范中的关键词：
+
+- **必须**：硬性要求，违反时必须说明原因并取得确认。
+- **应当**：默认要求，只有在有明确技术理由时才能例外。
+- **可以**：可选项，不应为了形式而执行。
+
+优先级从高到低：
+
+1. 用户数据和系统文件安全。
+2. 状态一致性、并发安全和可恢复性。
+3. macOS 原生体验与系统兼容性。
+4. 可读性、可维护性和可测试性。
+5. 命名、格式等风格要求。
+
+规范主要约束新增和修改的代码。发现历史遗留问题时，应记录并逐步整理，不得借规范名义进行无关的大规模重构。
 
 ---
 
-# 1. 基本开发原则
+# 1. 技术栈与依赖
 
-- 使用原生 Swift 和 SwiftUI 开发。
-- 优先使用 Apple 官方框架和系统 API。
-- 不引入不必要的第三方依赖。
-- 不使用 WebView、Electron 或其他 Web 技术实现原生 UI 能力。
-- 优先采用现代 Swift 语法和 API。
-- 保持代码简洁、可读、可维护。
-- 避免过度设计，不为简单功能引入复杂架构。
-- 不要将多个不相关的功能集中在一个文件中。
-- 修改代码时优先保持现有架构和设计风格。
+- 必须使用原生 Swift、SwiftUI、AppKit 和 Apple 官方框架。
+- 不得使用 WebView、Electron 或其他 Web 技术实现原生界面。
+- 不得引入无明确收益的第三方依赖。
+- 新依赖必须说明用途、维护状态、安全影响和替代方案。
+- 优先使用系统组件、系统材质和公开 API，不通过自定义绘制模拟系统控件。
 
-# 2. 文件与目录组织
+# 2. Swift 语言与并发
 
-## 2.1 一个文件一个主要类型
+## 2.1 语言模式
 
-原则上，一个 Swift 文件只声明一个主要类型。
+- 项目使用 Swift 6 语言模式。
+- App 目标默认使用 `MainActor` 隔离。
+- Helper 目标默认使用 `nonisolated` 隔离。
+- 必须开启完整的严格并发检查，不得通过关闭检查来“修复”并发错误。
+- 修改语言模式、默认隔离或严格并发设置时，必须完成 Debug、Release 和测试验证。
 
-例如：
+## 2.2 隔离边界
 
-```text
-Models/
-├── User.swift
-├── Article.swift
-└── Order.swift
+- UI、Core Data `viewContext`、AppKit 视图状态必须留在 `MainActor`。
+- 解析、校验、序列化、纯算法和文件格式转换等无 UI 状态逻辑应当声明为 `nonisolated`。
+- 可跨并发域传递的值类型应当符合 `Sendable`。
+- `@unchecked Sendable`、`nonisolated(unsafe)` 和手动锁只能用于 Apple 回调或 XPC 等无法自动证明安全的边界。
+- 使用 `@unchecked Sendable` 或 `nonisolated(unsafe)` 时必须写明安全不变量和同步方式。
+- 禁止为了让代码编译而随意添加 `@preconcurrency import`。
 
-Services/
-├── UserService.swift
-└── NetworkService.swift
-```
+## 2.3 异步任务
 
-不允许将多个无关的 Class、Struct、Enum 集中在一个文件中。
+- 优先使用 `async/await` 和结构化并发。
+- 新代码不得用 GCD 实现普通业务异步流程。
+- 在 AppKit、XPC、C 回调和只能使用 GCD 的系统边界，可以保留 GCD，但必须说明理由。
+- 非结构化 `Task` 必须有明确的生命周期和取消策略。
+- 长期运行或可被后续操作替代的任务必须保存引用并正确取消。
+- UI 状态只能在 `MainActor` 上更新。
+- 不得用 `Task.detached` 规避隔离检查。
 
-允许以下情况：
+# 3. 架构与文件组织
 
-- 一个类型及其紧密关联的辅助类型。
-- 一个类型的 extension。
-- 仅供当前文件使用的私有辅助类型。
-- 紧密关联的协议及其实现。
+## 3.1 职责边界
 
-## 2.2 文件命名
+- View 负责布局、交互和展示状态。
+- 复杂页面的状态和流程应当放在 `@Observable` 状态对象、Model 或 Service 中。
+- Core Data 事务、文件写入、导入导出和恢复流程不得堆放在大型 View 中。
+- View 的 `body` 不得同步读取磁盘、执行网络请求或运行高复杂度算法。
+- `NotificationCenter` 只用于 AppKit 菜单命令、系统通知和真正跨窗口的全局事件。
+- 不得用 `NotificationCenter` 代替普通的模型状态、回调和依赖注入。
 
-- 使用 PascalCase。
-- 文件名与主要类型名称保持一致。
-- 不使用拼音命名。
-- 不使用无意义的缩写。
+## 3.2 文件拆分
 
-例如：
-
-```text
-UserService.swift
-UserViewModel.swift
-NetworkManager.swift
-AppSettings.swift
-```
-
-## 2.3 目录组织
-
-按照职责和业务功能组织代码。
+- 一个文件原则上只声明一个主要类型。
+- 紧密关联的辅助类型、协议实现、私有辅助类型和 extension 可以放在同一文件。
+- UI 文件和状态协调器应当保持单一职责。
+- 文件接近 400 行时应检查是否存在多个独立职责；行数不是硬限制，职责混合才是拆分依据。
+- 不得把大量业务逻辑放进 `ContentView` 或单个 SwiftUI 页面。
+- 不得为了拆分而创建无意义的单向转发 extension。
 
 推荐结构：
 
 ```text
 Project/
 ├── App/
-│   ├── MainApp.swift
-│   └── AppDelegate.swift
-│
 ├── Core/
-│   ├── Constants/
-│   ├── Extensions/
-│   ├── Utilities/
-│   └── Errors/
-│
+├── Domain/
 ├── Models/
-│
 ├── Services/
-│
 ├── ViewModels/
-│
 ├── Views/
 │   ├── Components/
-│   ├── Home/
+│   ├── Main/
+│   ├── Profile/
+│   ├── Backups/
 │   └── Settings/
-│
 ├── Resources/
-│
 └── SupportingFiles/
 ```
 
-不要为了形式而创建过多目录。
+目录用于组织代码，不代表 Swift 命名空间。不要为简单功能创建过多目录。
 
-目录仅用于组织文件，不代表 Swift 命名空间或模块。
+# 4. 命名与访问控制
 
-# 3. 类型与命名规范
-
-统一使用以下命名规则：
-
-| 类型 | 命名规范 | 示例 |
-|---|---|---|
-| Class | PascalCase | UserService |
-| Struct | PascalCase | UserModel |
-| Enum | PascalCase | NetworkError |
-| Protocol | PascalCase | DataProviding |
-| Function | camelCase | fetchUser() |
-| Variable | camelCase | userName |
-| Constant | camelCase | maxRetryCount |
-| Enum Case | camelCase | case success |
-| Property | camelCase | isLoading |
-
-其他要求：
-
-- 类型名称使用明确的业务含义。
-- 方法名称应体现行为。
-- Boolean 属性优先使用 is、has、should、can 等前缀。
-- 避免使用单字母变量，循环索引等局部场景除外。
-- 不使用匈牙利命名法。
-- 不使用下划线连接变量名称。
-
-# 4. 访问控制
-
-合理使用 Swift 访问控制。
-
-默认规则：
-
-- `private`：类型内部实现细节。
-- `fileprivate`：仅在确实需要文件级访问时使用。
-- `internal`：模块内部使用，Swift 默认级别。
-- `public`：需要暴露给其他模块的 API。
-- `open`：仅在确实需要允许外部模块继承或重写时使用。
-
-要求：
-
+- 类型、协议和枚举使用 PascalCase。
+- 函数、变量、属性和枚举 case 使用 lowerCamelCase。
+- Boolean 属性应当使用 `is`、`has`、`should`、`can` 等前缀。
+- 新属性不得使用无意义缩写；已有持久化字段重命名必须评估迁移成本。
 - 优先使用最小访问权限。
-- 不要无理由声明 public。
-- 不要为了方便调用而随意扩大访问范围。
-- 不要将内部实现暴露给外部模块。
+- App 内部的 Core Data 类和实现细节不得声明为 `public`。
+- `public` 只用于真正跨模块暴露的 API。
+- `open` 只在确实允许外部继承或重写时使用。
 
-# 5. Swift 代码规范
+# 5. 类型、错误与数据安全
 
 ## 5.1 类型设计
 
-- 优先使用 Struct 表达值类型。
-- 只有需要引用语义、继承或共享可变状态时才使用 Class。
-- 合理使用 Enum 表达有限状态。
-- 优先使用不可变属性 `let`。
-- 避免不必要的全局变量和单例。
-- 避免使用隐式解包可选类型 `!`。
-- 优先使用 `guard let` 处理提前退出。
-- 避免强制类型转换，优先使用安全类型判断。
+- 优先使用 `let` 和值类型。
+- 只有需要引用语义、继承或共享可变状态时才使用 class。
+- 使用 enum 表达有限状态。
+- 避免隐式解包可选类型、强制转换和强制解包。
+- 使用 `guard let` 处理提前退出。
 
-## 5.2 Extension
+## 5.2 错误处理
 
-使用 extension 拆分类型的不同职责。
-
-例如：
-
-```swift
-struct User {
-    let id: Int
-    let name: String
-}
-
-extension User {
-    var displayName: String {
-        name
-    }
-}
-```
-
-不要为了拆分代码而创建没有实际意义的 extension。
-
-## 5.3 错误处理
-
-- 使用 Swift Error 协议定义业务错误。
-- 使用 `throws` 传递可恢复错误。
+- 业务错误必须使用结构化 `Error` 类型。
 - 不允许无理由使用 `try!`。
-- 不允许使用 `try?` 静默吞掉重要错误。
-- 错误信息应具备明确含义。
-- 避免使用字符串代替结构化错误类型。
+- `try?` 只能用于有意的清理、日志或降级路径，并必须注释为什么可以忽略。
+- 数据保存、数据库重置、权限申请、文件写入和状态恢复不得静默吞掉错误。
+- 跨层错误必须保留原始错误信息，不得只返回无语义的字符串。
 
-## 5.4 异步编程
+## 5.3 Core Data
 
-- 优先使用 Swift Concurrency。
-- 优先使用 async/await。
-- 避免在新代码中引入不必要的 GCD 回调。
-- 正确处理 Task 生命周期。
-- UI 状态更新必须在 MainActor 上执行。
-- 避免创建没有必要的非结构化 Task。
-- 注意避免数据竞争。
+- 修改实体、属性、关系或删除规则时，必须评估现有用户数据库的迁移。
+- Core Data schema 变更必须增加持久化往返测试。
+- Transformable 属性的 `attributeValueClassName` 必须是运行时可解析的 Objective-C 类名。
+- 不得用 `try?` 掩盖持久化失败。
+- 保存失败后必须 `rollback()` 或进入明确的恢复状态。
+- 多步文件与数据库操作必须定义失败后的恢复策略。
 
-# 6. SwiftUI 开发规范
+## 5.4 文件与特权操作
 
-## 6.1 View 组织
+- 修改 `/etc/hosts` 前必须校验内容并创建备份。
+- 系统文件写入必须使用临时文件、同步和原子替换。
+- 写入后必须重新读取并验证内容。
+- Helper 必须校验客户端代码签名和输入内容。
+- 不得扩大 Helper 的权限范围或暴露不必要的 XPC API。
+- 文件写入失败、数据库提交失败和验证失败必须可区分。
 
-- 一个 View 文件原则上只声明一个主要 View。
-- 复杂页面拆分为独立子 View。
-- 可复用组件放在 Views/Components。
-- 不要将整个应用界面集中在一个 Swift 文件中。
-- 避免过度拆分简单 View。
+# 6. SwiftUI 与 macOS UI
 
-## 6.2 状态管理
+## 6.1 View 职责
 
-根据实际场景选择：
+- View 不得承担 Core Data 事务、文件写入或复杂恢复逻辑。
+- 相同 UI 结构重复出现时应当提取组件。
+- 不创建只有一行且没有复用价值的组件。
+- 新状态管理优先使用 `@Observable`；现有 `ObservableObject` 架构可以继续使用。
+- View 和 ViewModel 不得互相持有不必要的强循环引用。
 
-- `@State`
-- `@Binding`
-- `@Observable`
-- `@StateObject`（适用于仍采用 ObservableObject 的代码）
-- `@ObservedObject`（适用于仍采用 ObservableObject 的代码）
-- `@Environment`
-- `@EnvironmentObject`（适用于现有 ObservableObject 架构）
+## 6.2 原生体验
 
-新代码优先使用现代 Observation 框架。
+- 优先使用 `NavigationSplitView`、Toolbar、Sidebar、Sheet、Popover、Alert 等系统组件。
+- 支持 Liquid Glass 时优先使用官方 `.glass`、`.glassProminent` 等语义样式。
+- 不得把普通模糊效果描述为 Liquid Glass。
+- 不得硬编码固定窗口尺寸来模拟所有布局。
+- 使用固定尺寸时必须说明场景，例如固定尺寸 Sheet 或编辑器预览。
 
-不要为了传递少量数据而创建复杂的全局状态管理机制。
+## 6.3 性能
 
-## 6.3 View 职责
+- View `body` 中不得执行文件 I/O。
+- 大文本处理、差异计算和导入导出应当使用有界算法。
+- 禁止在 UI 主线程运行 `O(n²)` 或更高复杂度的算法处理用户文件。
+- 列表内容必须使用稳定、唯一的身份标识。
+- 不得在每次 SwiftUI 重绘时重复创建昂贵格式化器或无界任务。
 
-View 主要负责：
+## 6.4 本地化与无障碍
 
-- UI 布局。
-- 用户交互。
-- 展示状态。
-- 响应状态变化。
+- 用户可见文案必须通过项目本地化入口或 String Catalog。
+- 不得新增只在中文或英文一种语言中存在的用户界面文案。
+- 图标按钮必须有 `help` 和 `accessibilityLabel`。
+- 不得只用颜色表达状态。
+- 必须保留键盘操作和 VoiceOver 可理解的语义。
 
-业务逻辑应放在合适的 Model、Service 或 ViewModel 中。
+## 6.5 Preview
 
-避免在 View 的 body 中编写复杂业务逻辑。
+- Preview 必须使用内存 Core Data、临时目录和隔离的 `UserDefaults`。
+- Preview 不得写入生产备份目录、生产数据库、`/etc/hosts`、全局偏好或注册 Helper。
+- 识别 Preview 环境时必须使用统一入口，同时检查 `XCODE_RUNNING_FOR_PREVIEWS` 和 `XCODE_RUNNING_FOR_PLAYGROUNDS`。
+- macOS 26/27 的 `List` Preview 兼容层只在受影响且需要时添加，不得替换 `List`。
+- 兼容层必须用 `#if DEBUG` 隔离。
+- 修改 `List` 行视图后，应当至少验证一次对应 `#Preview`。
+- Debug 可以关闭 Hardened Runtime 作为本地 Preview 特例；Release 和发布产物必须保持开启。
 
-## 6.4 组件复用
+# 7. 测试与验证
 
-- 相同 UI 结构出现多次时，应考虑提取公共组件。
-- 公共组件应具有明确的职责。
-- 避免创建只有一行代码且没有复用价值的组件。
-- 不要为了复用而牺牲组件的可读性。
+## 7.1 必须验证
 
-## 6.5 Xcode Preview 与 List 兼容性
+- 所有代码修改必须至少完成 Debug Build。
+- 修改并发、优化、签名、资源或发布配置时必须完成 Release Build。
+- 修改领域逻辑、解析、校验、备份、持久化或写作协调器时必须运行相关单元测试。
+- 修改主要用户流程时必须运行相关 UI 测试。
+- 修改 `List` 行或 Preview 兼容逻辑时必须验证对应 Preview。
+- 修复缺陷时必须增加回归测试，除非该问题无法自动化验证。
 
-macOS 26/27 的 SwiftUI Preview 存在已知崩溃：`List` 的 `ForEach` 直接返回自定义复合行时，Preview 宿主可能在 `TableViewListCore_Mac2.swift` 的 `ViewListTree.visitItem` / `OutlineListCoordinator.diffRows` 中触发 `fatalError`。该问题不一定在实际运行 App 时复现。
+## 7.2 测试设计
 
-遇到此问题时必须遵守：
+- 测试必须覆盖失败路径、边界条件和恢复流程。
+- 文件系统测试必须使用临时目录并清理。
+- `UserDefaults` 测试必须使用独立 suite。
+- Core Data 测试优先使用内存存储。
+- 不得依赖真实 `/etc/hosts`、真实 Helper 注册状态或生产备份目录。
+- 不得用重试或忽略错误的方式让测试“稳定通过”。
 
-- 保留 `List`，不要用 `ScrollView`、`LazyVStack` 等组件替换它来规避问题。
-- 不要删除行视图的业务实现或简化交互来绕过崩溃。
-- 仅在 Debug Preview 环境中加入兼容层，生产运行路径不得改变。
-- 使用 `AnyView(EmptyView())` 作为 `ForEach` 中自定义行之前的占位视图。
-- 同时识别 `XCODE_RUNNING_FOR_PREVIEWS` 和 `XCODE_RUNNING_FOR_PLAYGROUNDS`；Xcode 27 的 Preview 进程可能只设置后者。
-- Debug 配置的 `ENABLE_HARDENED_RUNTIME` 必须为 `NO`，否则 Preview 注入的 `__preview.dylib` 可能因签名校验而无法加载；Release 配置仍应为 `YES`。
+## 7.3 结果汇报
 
-兼容写法：
+- 未执行的测试不得声称通过。
+- 因签名、GUI 会话、权限或系统状态无法验证时，必须明确说明。
+- 必须区分编译通过、单元测试通过、UI 测试通过和人工 Preview 验证。
 
-```swift
-List {
-    ForEach(items) { item in
-        #if DEBUG
-        if isRunningInXcodePreview {
-            AnyView(EmptyView())
-        }
-        #endif
-        CustomRow(item: item)
-    }
-}
-```
+# 8. 注释与代码质量
 
-修改 `List` 或行视图后，必须至少验证一次对应的 `#Preview` 能完成渲染，而不能只确认项目编译通过。
+- 注释解释“为什么”，不重复代码。
+- 复杂状态恢复、并发同步、系统兼容和安全校验必须注释。
+- 公共 API 根据需要编写文档注释。
+- 不保留失效注释。
+- 不留下未使用代码、空实现或关闭检查的临时代码。
+- 不为通过编译而破坏业务逻辑。
+- 不修改无关文件。
+- 不在一次修改中混合无关重构和功能变更。
 
-# 7. macOS 原生 UI 规范
-
-本项目以 macOS 原生应用为目标。
-
-必须遵守：
-
-- 优先使用 SwiftUI 原生组件。
-- 尊重 macOS 系统交互习惯。
-- 优先使用系统提供的 Toolbar、Sidebar、NavigationSplitView、Sheet 等组件。
-- 正确使用系统安全区域和窗口布局机制。
-- 不要通过硬编码模拟系统原生组件。
-- 不要随意覆盖系统默认交互行为。
-- 优先使用系统材质、视觉效果和动画。
-
-## 7.1 Liquid Glass
-
-在支持 Liquid Glass 的系统版本中：
-
-- 优先使用 Apple 官方 Liquid Glass API。
-- 根据控件的实际语义选择适当的 Glass 样式。
-- 不要将普通模糊背景误认为 Liquid Glass。
-- 不要重复实现系统已经提供的玻璃效果。
-- 避免滥用 Glass，保证内容可读性。
-- 注意处理不同 macOS 版本之间的视觉差异。
-
-## 7.2 系统兼容性
-
-- 项目部署版本必须以 Xcode 项目配置为准。
-- 使用新系统 API 时必须检查 availability。
-- 不允许在不兼容的系统版本上直接调用新 API。
-- 对于新旧系统之间的视觉差异，应提供合理的兼容处理。
-- 不要仅为了兼容旧系统而牺牲新系统的原生体验。
-
-## 7.3 禁止事项
-
-- 不使用大量自定义绘制模拟原生系统控件。
-- 不随意修改系统默认圆角、阴影和材质。
-- 不使用定时器模拟本应由系统提供的状态更新机制。
-- 不使用固定尺寸强行适配所有窗口大小。
-- 不随意使用 NSViewRepresentable，只有 SwiftUI 无法满足需求时才考虑 AppKit。
-
-# 8. 注释规范
-
-- 注释应解释为什么这样实现，而不是重复代码本身。
-- 复杂算法、特殊处理和系统兼容逻辑必须添加注释。
-- 公共 API 应根据需要添加文档注释。
-- 不添加无意义的注释。
-- 不保留已经失效的注释。
-- 不要随意删除仍然有效的业务说明。
-
-# 9. 代码质量
-
-每次开发必须遵守：
-
-1. 优先复用已有实现。
-2. 不要重复实现项目已经具备的功能。
-3. 不要随意修改无关文件。
-4. 不要引入不必要的依赖。
-5. 不要留下无用变量、无用方法和废弃代码。
-6. 不要使用空实现掩盖未完成的功能。
-7. 不要通过关闭编译检查解决问题。
-8. 不要为了通过编译而破坏原有业务逻辑。
-
-# 10. 构建与验证
-
-完成代码修改后：
-
-- 检查代码是否存在编译错误。
-- 检查是否存在明显的并发安全问题。
-- 检查是否符合当前项目的最低系统版本。
-- 尽可能执行 Xcode Build。
-- 如果修改了 UI，检查不同窗口尺寸下的显示效果。
-- 如果无法完成构建或测试，必须明确说明原因。
-- 不允许声称已经通过测试，而实际上没有执行测试。
-
-# 11. Agent 执行要求
+# 9. Agent 工作流程
 
 开始开发前：
 
 1. 阅读本文件。
-2. 阅读相关目录和现有代码。
-3. 理解当前项目的架构和命名习惯。
-4. 确认是否已有可复用的组件或服务。
+2. 检查工作区状态，不覆盖用户未提交的改动。
+3. 阅读相关代码、测试和构建配置。
+4. 确认已有可复用组件和服务。
+5. 明确本次修改的边界和验证方式。
 
 开发过程中：
 
-1. 严格遵守本文件规范。
-2. 不要擅自改变项目整体架构。
-3. 不要为了完成任务而引入不必要的技术方案。
-4. 优先选择简单、原生、可维护的实现。
+1. 优先修复安全和数据一致性问题。
+2. 先补回归测试，再修改行为。
+3. 保持现有架构中合理的部分，不做无关重构。
+4. 遇到并发或持久化问题，优先修正隔离边界和生命周期。
+5. 不通过降低警告级别或关闭检查来绕过问题。
 
 开发完成后：
 
-1. 检查新增文件是否符合目录规范。
-2. 检查是否存在多个无关类型集中在一个文件的问题。
-3. 检查访问权限是否合理。
-4. 执行必要的构建和测试。
-5. 汇报修改内容、验证结果以及尚未解决的问题。
+1. 检查新增文件是否符合职责和命名规范。
+2. 检查是否存在多个无关主要类型集中在一个文件。
+3. 检查访问权限和并发隔离是否合理。
+4. 运行适用的 Debug、Release、单元测试、UI 测试和 Preview。
+5. 汇报修改内容、验证结果和未解决风险。

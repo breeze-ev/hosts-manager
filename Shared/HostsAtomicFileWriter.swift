@@ -1,7 +1,7 @@
 import Darwin
 import Foundation
 
-enum HostsAtomicFileWriteError: LocalizedError {
+nonisolated enum HostsAtomicFileWriteError: LocalizedError {
     case invalidContent(String)
     case cannotInspectDestination
     case cannotCreateTemporaryFile(Int32)
@@ -30,7 +30,7 @@ enum HostsAtomicFileWriteError: LocalizedError {
     }
 }
 
-enum HostsAtomicFileWriter {
+nonisolated enum HostsAtomicFileWriter {
     static func write(_ content: String, to targetURL: URL) throws {
         if let validationError = HostsValueValidator.validate(content: content) {
             throw HostsAtomicFileWriteError.invalidContent(validationError)

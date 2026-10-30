@@ -10,16 +10,14 @@ struct SystemHostsView: View {
     let isHeaderCollapsed: Bool
     let onScrollOffsetChange: (CGFloat) -> Void
     @EnvironmentObject private var l10n: Localization
-    @State private var revision = 0
+    @State private var content = ""
 
     private var live: [ParsedHostEntry] {
-        _ = revision
-        return HostsParser.parse(HostsWriter.currentContent())
+        HostsParser.parse(content)
     }
 
     private var raw: String {
-        _ = revision
-        return HostsWriter.currentContent()
+        content
     }
 
     private var filtered: [ParsedHostEntry] {
@@ -54,6 +52,11 @@ struct SystemHostsView: View {
                 } else {
                     List {
                         ForEach(Array(filtered.enumerated()), id: \.element.id) { index, entry in
+                            #if DEBUG
+                            if PreviewEnvironment.isRunning {
+                                AnyView(EmptyView())
+                            }
+                            #endif
                             HStack(spacing: 12) {
                                 Image(systemName: entry.isEnabled ? "circle.fill" : "circle")
                                     .font(.system(size: 9))
@@ -109,14 +112,18 @@ struct SystemHostsView: View {
             }
         }
         .onAppear {
-            revision += 1
+            refreshContent()
         }
         .onReceive(NotificationCenter.default.publisher(for: .hostsContentChanged)) { _ in
-            revision += 1
+            refreshContent()
         }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
-            revision += 1
+            refreshContent()
         }
+    }
+
+    private func refreshContent() {
+        content = HostsWriter.currentContent()
     }
 }
 

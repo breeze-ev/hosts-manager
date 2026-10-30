@@ -9,9 +9,12 @@ final class HostsHelperService: NSObject, HostsHelperServiceProtocol {
         _ content: String,
         withReply reply: @escaping (Int32, String?) -> Void
     ) {
+        let hostsURL = self.hostsURL
+        // XPC invokes the reply exactly once from the serial write queue.
+        nonisolated(unsafe) let reply = reply
         Self.writeQueue.async {
             do {
-                try HostsAtomicFileWriter.write(content, to: self.hostsURL)
+                try HostsAtomicFileWriter.write(content, to: hostsURL)
                 reply(HostsHelperErrorCode.success.rawValue, nil)
             } catch HostsAtomicFileWriteError.invalidContent(let message) {
                 reply(HostsHelperErrorCode.invalidContent.rawValue, message)

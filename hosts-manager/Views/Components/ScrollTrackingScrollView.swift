@@ -14,7 +14,9 @@ final class ScrollTrackingScrollView: NSScrollView {
             object: contentView,
             queue: .main
         ) { [weak self] _ in
-            self?.reportScrollOffset()
+            MainActor.assumeIsolated {
+                self?.reportScrollOffset()
+            }
         }
     }
 
@@ -22,7 +24,7 @@ final class ScrollTrackingScrollView: NSScrollView {
         fatalError("init(coder:) has not been implemented")
     }
 
-    deinit {
+    isolated deinit {
         if let boundsObserver {
             NotificationCenter.default.removeObserver(boundsObserver)
         }

@@ -141,14 +141,7 @@ final class SourceEditorProxy: ObservableObject {
             full.lineRange(for: NSMakeRange(end, 0))
         )
         let block = full.substring(with: combined)
-        let firstNonEmpty = block.components(separatedBy: "\n")
-            .first { !$0.trimmingCharacters(in: .whitespaces).isEmpty } ?? "#"
-        let shouldComment = !firstNonEmpty.hasPrefix("#")
-        let toggled = block.components(separatedBy: "\n").map { line -> String in
-            let stripped = line.trimmingCharacters(in: .whitespaces)
-            if stripped.isEmpty { return line }
-            return shouldComment ? "# " + line : String(stripped.dropFirst()).trimmingCharacters(in: .whitespaces)
-        }.joined(separator: "\n")
+        let toggled = HostsSourceEditing.toggledComment(in: block)
 
         guard tv.shouldChangeText(in: combined, replacementString: toggled) else { return }
         tv.textStorage?.replaceCharacters(in: combined, with: toggled)
@@ -179,7 +172,9 @@ private final class LineNumberRulerView: NSRulerView {
             object: scrollView.contentView,
             queue: .main
         ) { [weak self] _ in
-            self?.needsDisplay = true
+            MainActor.assumeIsolated {
+                self?.needsDisplay = true
+            }
         }
         wantsLayer = true
         layer?.backgroundColor = NSColor.clear.cgColor

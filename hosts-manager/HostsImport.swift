@@ -1,7 +1,7 @@
 import Foundation
 import UniformTypeIdentifiers
 
-enum HostsImportError: Error {
+nonisolated enum HostsImportError: Error {
     case unreadable
     case tooLarge
     case invalidEncoding
@@ -9,12 +9,12 @@ enum HostsImportError: Error {
     case noUserEntries
 }
 
-struct HostsImportResult {
+nonisolated struct HostsImportResult {
     let suggestedProfileName: String
     let entries: [ParsedHostEntry]
 }
 
-enum HostsImport {
+nonisolated enum HostsImport {
     static let maximumFileSize = 1_048_576
     static let allowedContentTypes: [UTType] = {
         var types: [UTType] = [.plainText]

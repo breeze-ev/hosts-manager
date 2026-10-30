@@ -20,7 +20,7 @@ struct NavigationSidebarView: View {
             List {
                 ForEach(profiles) { profile in
                     #if DEBUG
-                    if isRunningInXcodePreview {
+                    if PreviewEnvironment.isRunning {
                         // Xcode macOS Preview crashes when ForEach directly
                         // returns a custom row from within List.
                         AnyView(EmptyView())

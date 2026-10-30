@@ -4,173 +4,6 @@ import AppKit
 import Combine
 import UniformTypeIdentifiers
 
-extension Notification.Name {
-    static let openSettings = Notification.Name("hostsManager.openSettings")
-    static let performApply = Notification.Name("hostsManager.performApply")
-    static let sourceDraftApplied = Notification.Name("hostsManager.sourceDraftApplied")
-    static let profileEntriesChanged = Notification.Name("hostsManager.profileEntriesChanged")
-    static let defaultEntryModeChanged = Notification.Name("hostsManager.defaultEntryModeChanged")
-    static let sourceFind = Notification.Name("hostsManager.sourceFind")
-    static let sourceToggleComment = Notification.Name("hostsManager.sourceToggleComment")
-    static let hostsStateReconciled = Notification.Name("hostsManager.hostsStateReconciled")
-    static let hostsStateNeedsReconciliation = Notification.Name("hostsManager.hostsStateNeedsReconciliation")
-    static let hostsStateSynchronized = Notification.Name("hostsManager.hostsStateSynchronized")
-}
-
-enum HostsStateNotificationKey {
-    static let appliedProfileIDs = "appliedProfileIDs"
-    static let managedHostnames = "managedHostnames"
-    static let skipRealtimeApply = "skipRealtimeApply"
-}
-
-enum SidebarItem: String, CaseIterable, Hashable {
-    case profiles, backups, settings
-}
-
-enum EntryMode: String, CaseIterable {
-    case list, source
-}
-
-var isRunningInXcodePreview: Bool {
-    #if DEBUG
-    let environment = ProcessInfo.processInfo.environment
-    return environment["XCODE_RUNNING_FOR_PREVIEWS"] == "1"
-        || environment["XCODE_RUNNING_FOR_PLAYGROUNDS"] == "1"
-    #else
-    return false
-    #endif
-}
-
-struct HostsWriteConflictError: Error {
-    let profileID: UUID
-}
-
-struct HostsWriteAbortedError: Error {}
-
-/// Commits the backup record and profile state in one Core Data transaction.
-/// The hosts file has already been written when this runs. If the transaction
-/// fails, roll back the in-memory changes and surface the original error so the
-/// caller can report "file written, state not saved" instead of claiming the
-/// write itself failed.
-@MainActor
-@discardableResult
-func commitHostsWrite(
-    result: HostsWriteResult,
-    context: NSManagedObjectContext,
-    profileName: String?,
-    note: String,
-    appliedProfileIDs: [UUID],
-    checkStateIntegrity: () -> Bool = { true },
-    stateChanges: () throws -> Void
-) throws -> Bool {
-    let record = BackupRecord(context: context)
-    record.id = UUID()
-    record.timestamp = Date()
-    record.filePath = result.backupURL.path
-    record.profileName = profileName
-    record.note = note
-
-    do {
-        try stateChanges()
-        guard checkStateIntegrity() else {
-            throw HostsWriteStateReconciliationError()
-        }
-        try context.save()
-    } catch {
-        context.rollback()
-        NotificationCenter.default.post(
-            name: .hostsStateNeedsReconciliation,
-            object: result.content,
-            userInfo: [
-                HostsStateNotificationKey.appliedProfileIDs: appliedProfileIDs
-            ]
-        )
-        throw error
-    }
-
-    // Retention cleanup is not part of the write transaction. A cleanup
-    // failure must not turn a successfully committed write into a failure.
-    do {
-        try BackupMaintenance.prune(context: context)
-    } catch {
-        // prune may have queued record deletions before its save failed.
-        // Never leave those deletions to be committed by an unrelated save.
-        context.rollback()
-    }
-    return true
-}
-
-extension View {
-    func zebraRowBackground(_ index: Int) -> some View {
-        // Keep the stripe as a faint tint. The system alternating colors are
-        // opaque, which becomes very heavy over a translucent window.
-        let color = index.isMultiple(of: 2)
-            ? Color.clear
-            : Color.primary.opacity(0.05)
-        return listRowBackground(
-            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                .fill(color)
-                .padding(.horizontal, 4)
-                .padding(.vertical, 1)
-        )
-    }
-
-    func detailHeaderScrollTracking(_ onChange: @escaping (CGFloat) -> Void) -> some View {
-        onScrollGeometryChange(for: CGFloat.self) { geometry in
-            max(0, geometry.contentOffset.y + geometry.contentInsets.top)
-        } action: { _, offset in
-            onChange(offset)
-        }
-    }
-
-    func detailListSafeAreaHeader<Header: View>(
-        isCollapsed: Bool,
-        @ViewBuilder _ header: () -> Header
-    ) -> some View {
-        scrollContentBackground(.hidden)
-            .scrollEdgeEffectStyle(.soft, for: .all)
-            .safeAreaBar(edge: .top, alignment: .leading, spacing: 0) {
-                if !isCollapsed {
-                    header()
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.bottom, 10)
-                }
-            }
-    }
-
-    func editorSurface(cornerRadius: CGFloat = 12) -> some View {
-        let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-        return background(shape.fill(.thinMaterial))
-            .overlay(shape.stroke(.quaternary.opacity(0.5), lineWidth: 1))
-            .clipShape(shape)
-    }
-
-    func detailCard(cornerRadius: CGFloat = 12) -> some View {
-        let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-        return background(shape.fill(.ultraThinMaterial))
-            .overlay(shape.stroke(.quaternary.opacity(0.45), lineWidth: 1))
-            .clipShape(shape)
-    }
-}
-
-func detailProfileStatusText(for profile: Profile, l10n: Localization) -> String {
-    if profile.isSystem { return l10n.s("系统只读", "System") }
-    if profile.isAppliedForSystem { return l10n.s("已应用", "Applied") }
-    return l10n.s("未应用", "Not applied")
-}
-
-func detailProfileSubtitle(for profile: Profile, l10n: Localization) -> String {
-    if profile.isSystem {
-        let live = HostsParser.parse(HostsWriter.currentContent())
-        let on = live.filter(\.isEnabled).count
-        let off = live.count - on
-        return l10n.s("\(on) 条启用 · \(off) 条停用", "\(on) enabled · \(off) disabled")
-    }
-    let on = profile.sortedEntries.filter(\.isEnabled).count
-    let off = profile.sortedEntries.count - on
-    return l10n.s("\(on) 条启用 · \(off) 条停用", "\(on) enabled · \(off) disabled")
-}
-
 struct ContentView: View {
     @Environment(\.managedObjectContext) private var context
     @FetchRequest(sortDescriptors: [
@@ -276,7 +109,7 @@ struct ContentView: View {
         if ProcessInfo.processInfo.arguments.contains("-UITestDisableHelperGuide") {
             return false
         }
-        if isRunningInXcodePreview {
+        if PreviewEnvironment.isRunning {
             return false
         }
         #endif
@@ -391,13 +224,17 @@ struct ContentView: View {
                 showHelperGuide = true
             }
             applyAppearance()
-            reconcileOnLaunch()
+            if !PreviewEnvironment.isRunning {
+                reconcileOnLaunch()
+            }
         }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             if HostsHelperClient.isRegistered {
                 showHelperGuide = false
             }
-            reconcileOnLaunch()
+            if !PreviewEnvironment.isRunning {
+                reconcileOnLaunch()
+            }
         }
         .onReceive(NotificationCenter.default.publisher(for: .hostsStateReconciled)) { _ in
             reconcileSystemHosts()
@@ -502,13 +339,10 @@ struct ContentView: View {
     }
 
     private func createProfile() {
-        let profile = Profile(context: context)
-        profile.id = UUID()
-        profile.name = l10n.s("新配置", "New Profile")
-        // 新配置还没有写入 /etc/hosts，开关必须是关闭的：打开开关才代表“已生效”。
-        profile.setApplied(false)
-        profile.createdAt = Date()
-        profile.updatedAt = Date()
+        let repository = ProfileRepository(context: context)
+        let profile = repository.create(
+            name: l10n.s("新配置", "New Profile")
+        )
         do {
             try context.save()
         } catch {
@@ -532,7 +366,7 @@ struct ContentView: View {
         // 先取 id：对象删除并保存之后再去读属性是不可靠的。
         let profileID = profile.id
         let wasSelected = selectedProfileID == profileID
-        context.delete(profile)
+        ProfileRepository(context: context).delete(profile)
         do {
             try context.save()
         } catch {
@@ -578,23 +412,10 @@ struct ContentView: View {
             sourceDraftValidations.removeValue(forKey: profileID)
             return true
         }
-        let sorted = profile.sortedEntries
-        for e in sorted { context.delete(e) }
-        var idx = 0
-        for item in newEntries {
-            let entry = HostEntry(context: context)
-            entry.id = UUID()
-            entry.profile = profile
-            entry.ip = item.ip
-            entry.hostnames = item.hostnames
-            entry.desc = item.desc
-            entry.isEnabled = item.isEnabled
-            entry.isSystem = item.isSystem
-            entry.sortIndex = Int64(idx)
-            entry.createdAt = Date()
-            idx += 1
-        }
-        profile.updatedAt = Date()
+        ProfileRepository(context: context).replaceEntries(
+            of: profile,
+            with: newEntries
+        )
         do {
             try context.save()
         } catch {
@@ -790,6 +611,15 @@ struct ContentView: View {
         // 未启用的配置也允许“应用”：应用本身就是带预览的启用流程，
         // 确认写入后会同时把开关打开。
         guard !profile.isSystem else { return false }
+        guard !stateCommitFailed else {
+            showStateRecoveryWarning = true
+            return false
+        }
+        guard !writeCoordinator.requiresStateRecovery else {
+            stateCommitFailed = true
+            showStateRecoveryWarning = true
+            return false
+        }
         guard validateSourceDraftIfNeeded(for: profile) else { return false }
         if let profileID = profile.id,
            let draft = sourceDrafts[profileID],
@@ -1318,16 +1148,13 @@ struct ContentView: View {
 
         do {
             let imported = try HostsImport.load(from: url)
-            let profile = Profile(context: context)
-            profile.id = UUID()
-            profile.name = l10n.s(
-                "导入 \(imported.suggestedProfileName)",
-                "Imported \(imported.suggestedProfileName)"
+            let profile = ProfileRepository(context: context).create(
+                name: l10n.s(
+                    "导入 \(imported.suggestedProfileName)",
+                    "Imported \(imported.suggestedProfileName)"
+                ),
+                entries: imported.entries
             )
-            profile.setApplied(false)
-            profile.createdAt = Date()
-            profile.updatedAt = Date()
-            addEntries(imported.entries, to: profile)
             try context.save()
             selectedProfileID = profile.id
             selection = .profiles
@@ -1362,14 +1189,7 @@ struct ContentView: View {
 
     private func duplicateSelectedProfile() {
         guard let source = selectedProfile, !source.isSystem else { return }
-        let profile = Profile(context: context)
-        profile.id = UUID()
         let sourceName = source.localizedName(isEnglish: l10n.isEnglish)
-        profile.name = l10n.s("\(sourceName) 副本", "\(sourceName) Copy")
-        // 副本没有写入系统，开关保持关闭，避免“开关已开但系统里没有内容”。
-        profile.setApplied(false)
-        profile.createdAt = Date()
-        profile.updatedAt = Date()
         let entries = source.sortedEntries.map {
             ParsedHostEntry(
                 ip: $0.ip ?? "",
@@ -1379,7 +1199,10 @@ struct ContentView: View {
                 isSystem: $0.isSystem
             )
         }
-        addEntries(entries, to: profile)
+        let profile = ProfileRepository(context: context).create(
+            name: l10n.s("\(sourceName) 副本", "\(sourceName) Copy"),
+            entries: entries
+        )
         do {
             try context.save()
             selectedProfileID = profile.id
@@ -1399,21 +1222,6 @@ struct ContentView: View {
             try sourceText(for: profile).write(to: url, atomically: true, encoding: .utf8)
         } catch {
             operationError = localizedError(error)
-        }
-    }
-
-    private func addEntries(_ entries: [ParsedHostEntry], to profile: Profile) {
-        for (index, item) in entries.enumerated() {
-            let entry = HostEntry(context: context)
-            entry.id = UUID()
-            entry.profile = profile
-            entry.ip = item.ip
-            entry.hostnames = item.hostnames
-            entry.desc = item.desc
-            entry.isEnabled = item.isEnabled
-            entry.isSystem = item.isSystem
-            entry.sortIndex = Int64(index)
-            entry.createdAt = Date()
         }
     }
 

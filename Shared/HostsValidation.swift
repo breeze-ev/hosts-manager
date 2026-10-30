@@ -1,7 +1,7 @@
 import Darwin
 import Foundation
 
-enum HostsValueValidator {
+nonisolated enum HostsValueValidator {
     nonisolated private static let maximumContentBytes = 1_048_576
 
     nonisolated static func normalizedIP(_ input: String) -> String? {

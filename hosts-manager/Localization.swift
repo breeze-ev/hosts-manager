@@ -17,7 +17,7 @@ final class Localization: ObservableObject {
     func s(_ zh: String, _ en: String) -> String { isEnglish ? en : zh }
 }
 
-enum LocalizationPreference {
+nonisolated enum LocalizationPreference {
     nonisolated static func isEnglish(for language: String) -> Bool {
         switch language {
         case "en": return true

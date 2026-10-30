@@ -29,6 +29,11 @@ struct BackupsView: View {
             } else {
                 List {
                     ForEach(Array(backups.enumerated()), id: \.element.id) { index, backup in
+                        #if DEBUG
+                        if PreviewEnvironment.isRunning {
+                            AnyView(EmptyView())
+                        }
+                        #endif
                         BackupRow(
                             backup: backup,
                             onView: { previewBackup = backup },
@@ -57,7 +62,7 @@ struct BackupsView: View {
         }
         .onAppear {
             onTitleBarScrollOffsetChange(0)
-            guard ProcessInfo.processInfo.environment["XCODE_RUNNING_FOR_PREVIEWS"] != "1" else {
+            guard !PreviewEnvironment.isRunning else {
                 return
             }
             do {
@@ -109,27 +114,13 @@ struct BackupsView: View {
         }
         restoreBackup = nil
         if asNewProfile {
-            let profile = Profile(context: context)
-            profile.id = UUID()
-            profile.name = l10n.s(
-                "从备份恢复 \(Date().formatted(date: .abbreviated, time: .shortened))",
-                "Restored \(Date().formatted(date: .abbreviated, time: .shortened))"
+            _ = ProfileRepository(context: context).create(
+                name: l10n.s(
+                    "从备份恢复 \(Date().formatted(date: .abbreviated, time: .shortened))",
+                    "Restored \(Date().formatted(date: .abbreviated, time: .shortened))"
+                ),
+                entries: HostsParser.parse(content).filter { !$0.isSystem }
             )
-            profile.setApplied(false)
-            profile.createdAt = Date()
-            profile.updatedAt = Date()
-            for (index, item) in HostsParser.parse(content).filter({ !$0.isSystem }).enumerated() {
-                let entry = HostEntry(context: context)
-                entry.id = UUID()
-                entry.profile = profile
-                entry.ip = item.ip
-                entry.hostnames = item.hostnames
-                entry.desc = item.desc
-                entry.isEnabled = item.isEnabled
-                entry.isSystem = false
-                entry.sortIndex = Int64(index)
-                entry.createdAt = Date()
-            }
             do {
                 try context.save()
                 restoreMessage = l10n.s("已恢复为新配置。", "Restored as a new profile.")
@@ -179,7 +170,12 @@ struct BackupsView: View {
                 }
             } catch {
                 await MainActor.run {
-                    if let commitError = error as? HostsWriteCommitError {
+                    if error is HostsStateRecoveryRequiredError {
+                        restoreMessage = l10n.s(
+                            "配置状态尚未恢复，写入已暂停。请先完成恢复操作。",
+                            "Profile state recovery is pending and writes are paused. Complete recovery first."
+                        )
+                    } else if let commitError = error as? HostsWriteCommitError {
                         // The file already contains the backup and all previous
                         // profiles are intended to be unapplied. Pose the exact
                         // empty selection so recovery cannot reapply stale ids.
