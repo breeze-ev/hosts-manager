@@ -192,8 +192,11 @@ final class HostsWorkspaceModel {
 
     func updateSourceDraft(_ value: String, for profile: Profile) {
         guard let profileID = profile.id else { return }
-        let stored = parsedEntries(for: profile)
-        if HostsParser.entriesEquivalent(HostsParser.parse(value), stored) {
+        // Compare raw text, not parsed entries. A formatting-only edit such as
+        // pressing Return at the end of the file parses to the same entries;
+        // dropping the draft then makes the binding return the generated text
+        // and updateNSView overwrites the text view, swallowing the keystroke.
+        if value == localizedSourceText(for: profile, isEnglish: l10n.isEnglish) {
             clearDraft(for: profileID)
             return
         }
