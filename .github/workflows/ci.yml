@@ -13,6 +13,8 @@ jobs:
       - uses: maxim-lobanov/setup-xcode@v1
         with:
           xcode-version: '26.6'
+      - name: Prepare local build number config
+        run: cp Config/BuildNumber.xcconfig.example Config/BuildNumber.xcconfig
       - name: Run unit tests
         run: |
           xcodebuild test \
