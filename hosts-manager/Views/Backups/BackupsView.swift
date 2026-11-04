@@ -13,16 +13,12 @@ struct BackupsView: View {
     @State private var restoreBackup: BackupRecord?
     @State private var restoreMessage: String?
     @StateObject private var writeCoordinator = HostsWriteCoordinator.shared
-    let isTitleBarCollapsed: Bool
-    let onTitleBarScrollOffsetChange: (CGFloat) -> Void
 
     var body: some View {
         Group {
             if backups.isEmpty {
                 VStack(alignment: .leading, spacing: 14) {
-                    if !isTitleBarCollapsed {
-                        header
-                    }
+                    header
                     ContentUnavailableView(l10n.s("暂无备份", "No backups"), systemImage: "clock.arrow.circlepath")
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
@@ -42,14 +38,12 @@ struct BackupsView: View {
                         .zebraRowBackground(index)
                     }
                 }
+                .scrollEdgeEffectStyle(.soft, for: .all)
                 .listStyle(.inset)
-                .detailListSafeAreaHeader(isCollapsed: isTitleBarCollapsed) {
+                .detailListSafeAreaHeader {
                     header
                 }
                 .background(.clear)
-                .detailHeaderScrollTracking { offset in
-                    onTitleBarScrollOffsetChange(offset)
-                }
             }
         }
         .padding(.horizontal, 22)
@@ -61,7 +55,6 @@ struct BackupsView: View {
             }
         }
         .onAppear {
-            onTitleBarScrollOffsetChange(0)
             guard !PreviewEnvironment.isRunning else {
                 return
             }
@@ -93,7 +86,6 @@ struct BackupsView: View {
 
     private var header: some View {
         DetailPageHeader(
-            title: l10n.s("备份", "Backups"),
             subtitle: l10n.s(
                 "每次写入前自动生成时间戳备份，可查看并还原。",
                 "Timestamped backups are created before each write. View or restore anytime."
@@ -223,10 +215,7 @@ struct BackupsView: View {
 #Preview("Backups") {
     let _ = PreviewFixtures.backup
 
-    BackupsView(
-        isTitleBarCollapsed: false,
-        onTitleBarScrollOffsetChange: { _ in }
-    )
+    BackupsView()
     .environment(\.managedObjectContext, PreviewFixtures.context)
     .environmentObject(Localization())
     .frame(width: 860, height: 620)

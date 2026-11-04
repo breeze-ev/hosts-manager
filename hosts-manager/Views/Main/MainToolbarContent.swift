@@ -2,6 +2,7 @@ import SwiftUI
 
 struct MainToolbarContent: ToolbarContent {
     let selection: SidebarItem
+    let title: String
     let query: Binding<String>
     let mode: Binding<EntryMode>
     let selectedProfile: Profile?
@@ -12,6 +13,33 @@ struct MainToolbarContent: ToolbarContent {
 
     @ToolbarContentBuilder
     var body: some ToolbarContent {
+        ToolbarItem(placement: .navigation) {
+            HStack(spacing: 8) {
+                Text(title)
+                    .font(.headline)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .layoutPriority(1)
+                    .accessibilityIdentifier("detail-toolbar-title")
+
+                if selection == .profiles, let selectedProfile {
+                    ProfileStatusBadge(profile: selectedProfile)
+                        .fixedSize()
+                }
+
+                Spacer(minLength: 0)
+            }
+            .padding(10)
+            .frame(minWidth: ToolbarTitleLayout.minimumWidth, alignment: .leading)
+        }
+        .sharedBackgroundVisibility(.hidden)
+
+        // primaryAction only describes intent; an explicit flexible item keeps
+        // the actions in the trailing cluster on macOS.
+        ToolbarItem {
+            Spacer()
+        }
+
         if selection == .profiles {
             ToolbarItemGroup(placement: .primaryAction) {
                 HStack(spacing: 8) {
@@ -19,6 +47,7 @@ struct MainToolbarContent: ToolbarContent {
                         .foregroundStyle(.secondary)
                     TextField(l10n.s("搜索", "Search"), text: query)
                         .textFieldStyle(.plain)
+                        .accessibilityIdentifier("toolbar-search-field")
                 }
                 .padding(.leading, 10)
                 .frame(width: 190, alignment: .leading)
@@ -50,4 +79,10 @@ struct MainToolbarContent: ToolbarContent {
             }
         }
     }
+}
+
+private enum ToolbarTitleLayout {
+    // macOS centers narrow navigation items; a stable width keeps titles
+    // aligned when a page has no status badge.
+    static let minimumWidth: CGFloat = 240
 }

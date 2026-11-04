@@ -7,8 +7,6 @@ struct SystemHostsView: View {
     let mode: EntryMode
     let query: String
     let header: AnyView
-    let isHeaderCollapsed: Bool
-    let onScrollOffsetChange: (CGFloat) -> Void
     @EnvironmentObject private var l10n: Localization
     @State private var content = ""
 
@@ -35,17 +33,13 @@ struct SystemHostsView: View {
             if mode == .list {
                 if live.isEmpty {
                     VStack(alignment: .leading, spacing: 14) {
-                        if !isHeaderCollapsed {
-                            header
-                        }
+                        header
                         ContentUnavailableView(l10n.s("无法读取 /etc/hosts", "Could not read /etc/hosts"), systemImage: "exclamationmark.triangle")
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
                     }
                 } else if filtered.isEmpty {
                     VStack(alignment: .leading, spacing: 14) {
-                        if !isHeaderCollapsed {
-                            header
-                        }
+                        header
                         ContentUnavailableView(l10n.s("没有匹配的条目", "No matching entries"), systemImage: "magnifyingglass")
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
                     }
@@ -87,10 +81,9 @@ struct SystemHostsView: View {
                         }
                     }
                     .listStyle(.inset)
-                    .detailListSafeAreaHeader(isCollapsed: isHeaderCollapsed) {
+                    .detailListSafeAreaHeader {
                         header
                     }
-                    .detailHeaderScrollTracking(onScrollOffsetChange)
                 }
             } else {
                 VStack(alignment: .leading, spacing: 14) {
@@ -101,8 +94,7 @@ struct SystemHostsView: View {
                             .foregroundStyle(.secondary)
                         ReadOnlyHostsTextView(
                             content: raw,
-                            query: query,
-                            onScrollOffsetChange: onScrollOffsetChange
+                            query: query
                         )
                             .padding(12)
                             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -133,7 +125,6 @@ struct SystemHostsView: View {
         query: "",
         header: AnyView(
             DetailPageHeader(
-                title: "系统",
                 subtitle: "来自 /etc/hosts 的实时内容",
                 badge: AnyView(
                     Text("系统只读")
@@ -144,9 +135,7 @@ struct SystemHostsView: View {
                         .foregroundStyle(.secondary)
                 )
             )
-        ),
-        isHeaderCollapsed: false,
-        onScrollOffsetChange: { _ in }
+        )
     )
     .environmentObject(Localization())
     .frame(width: 860, height: 620)

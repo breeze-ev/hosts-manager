@@ -1,12 +1,10 @@
 import SwiftUI
 
 private enum DetailHeaderMetrics {
-    static let titleSize: CGFloat = 28
     static let subtitleSize: CGFloat = 13
 }
 
 struct DetailPageHeader: View {
-    let title: String
     let subtitle: String?
     var badge: AnyView?
     var trailing: AnyView?
@@ -14,14 +12,8 @@ struct DetailPageHeader: View {
     var body: some View {
         HStack(alignment: .bottom, spacing: 16) {
             VStack(alignment: .leading, spacing: 5) {
-                HStack(spacing: 10) {
-                    Text(title)
-                        .font(.system(size: DetailHeaderMetrics.titleSize, weight: .bold))
-                        .foregroundStyle(.primary)
-                        .lineLimit(1)
-                    if let badge {
-                        badge
-                    }
+                if let badge {
+                    badge
                 }
                 if let subtitle, !subtitle.isEmpty {
                     Text(subtitle)
@@ -41,7 +33,6 @@ struct DetailPageHeader: View {
 
 #Preview("Detail Page Header") {
     DetailPageHeader(
-        title: "开发环境",
         subtitle: "5 条启用 · 2 条停用",
         badge: AnyView(
             Text("已应用")

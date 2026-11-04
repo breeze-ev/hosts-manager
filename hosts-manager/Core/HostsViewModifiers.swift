@@ -13,26 +13,15 @@ extension View {
         )
     }
 
-    func detailHeaderScrollTracking(_ onChange: @escaping (CGFloat) -> Void) -> some View {
-        onScrollGeometryChange(for: CGFloat.self) { geometry in
-            max(0, geometry.contentOffset.y + geometry.contentInsets.top)
-        } action: { _, offset in
-            onChange(offset)
-        }
-    }
-
     func detailListSafeAreaHeader<Header: View>(
-        isCollapsed: Bool,
         @ViewBuilder _ header: () -> Header
     ) -> some View {
         scrollContentBackground(.hidden)
             .scrollEdgeEffectStyle(.soft, for: .all)
             .safeAreaBar(edge: .top, alignment: .leading, spacing: 0) {
-                if !isCollapsed {
-                    header()
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.bottom, 10)
-                }
+                header()
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.bottom, 10)
             }
     }
 

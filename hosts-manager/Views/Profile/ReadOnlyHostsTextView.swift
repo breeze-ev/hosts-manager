@@ -4,10 +4,9 @@ import AppKit
 struct ReadOnlyHostsTextView: NSViewRepresentable {
     let content: String
     let query: String
-    let onScrollOffsetChange: (CGFloat) -> Void
 
     func makeNSView(context: Context) -> NSScrollView {
-        let scrollView = ScrollTrackingScrollView()
+        let scrollView = NSScrollView()
         scrollView.hasVerticalScroller = true
         scrollView.drawsBackground = false
         let contentSize = scrollView.contentSize
@@ -27,15 +26,10 @@ struct ReadOnlyHostsTextView: NSViewRepresentable {
         textView.string = content
         scrollView.documentView = textView
         Self.apply(content: content, query: query, to: textView)
-        scrollView.onScrollOffsetChange = onScrollOffsetChange
-        DispatchQueue.main.async {
-            scrollView.reportScrollOffset()
-        }
         return scrollView
     }
 
     func updateNSView(_ nsView: NSScrollView, context: Context) {
-        (nsView as? ScrollTrackingScrollView)?.onScrollOffsetChange = onScrollOffsetChange
         guard let tv = nsView.documentView as? NSTextView else { return }
         if tv.string != content {
             tv.string = content
@@ -70,8 +64,7 @@ struct ReadOnlyHostsTextView: NSViewRepresentable {
 
         127.0.0.1 api.dev.local
         """,
-        query: "localhost",
-        onScrollOffsetChange: { _ in }
+        query: "localhost"
     )
     .editorSurface()
     .frame(width: 720, height: 360)

@@ -20,7 +20,6 @@ struct HostsWorkspaceView: View {
 
     let workspace: HostsWorkspaceModel
     @State private var query = ""
-    @State private var detailTitleBarCollapsed = false
     @State private var showHelperGuide = false
 
     private var profileList: [Profile] {
@@ -31,37 +30,16 @@ struct HostsWorkspaceView: View {
         workspace.selectedProfile(in: profileList)
     }
 
-    private var navigationTitle: String {
-        guard showsCompactTitleBar else { return "Hosts Manager" }
+    private var detailPageTitle: String {
         switch workspace.selection {
         case .profiles:
-            guard let profile = selectedProfile else { return "Hosts Manager" }
-            return "\(profile.localizedName(isEnglish: l10n.isEnglish)) · \(detailProfileStatusText(for: profile, l10n: l10n))"
+            selectedProfile?.localizedName(isEnglish: l10n.isEnglish)
+                ?? l10n.s("配置", "Profiles")
         case .backups:
-            return l10n.s("备份", "Backups")
+            l10n.s("备份", "Backups")
         case .settings:
-            return "Hosts Manager"
+            l10n.s("设置", "Settings")
         }
-    }
-
-    private var navigationSubtitle: String {
-        guard showsCompactTitleBar else { return "" }
-        switch workspace.selection {
-        case .profiles:
-            guard let profile = selectedProfile else { return "" }
-            return detailProfileSubtitle(for: profile, l10n: l10n)
-        case .backups:
-            return l10n.s(
-                "每次写入前自动生成时间戳备份，可查看并还原。",
-                "Timestamped backups are created before each write. View or restore anytime."
-            )
-        case .settings:
-            return ""
-        }
-    }
-
-    private var showsCompactTitleBar: Bool {
-        detailTitleBarCollapsed && workspace.selection != .settings
     }
 
     private var shouldShowHelperGuideOnLaunch: Bool {
@@ -109,19 +87,19 @@ struct HostsWorkspaceView: View {
                 onApply: { profile in
                     workspace.applyProfile(profile, in: profileList)
                 },
-                onDiscardDraft: workspace.discardSourceDraft,
-                isTitleBarCollapsed: detailTitleBarCollapsed,
-                onTitleBarScrollOffsetChange: updateDetailTitleBarState
+                onDiscardDraft: workspace.discardSourceDraft
             )
         }
+        .scrollEdgeEffectStyle(.soft, for: .all)
         .containerBackground(for: .window) {
             MainWindowBackground(isBlurEnabled: backgroundBlurEnabled)
         }
-        .navigationTitle(navigationTitle)
-        .navigationSubtitle(navigationSubtitle)
+        .navigationTitle(detailPageTitle)
+        .toolbar(removing: .title)
         .toolbar {
             MainToolbarContent(
                 selection: workspace.selection,
+                title: detailPageTitle,
                 query: $query,
                 mode: $workspace.mode,
                 selectedProfile: selectedProfile,
@@ -251,15 +229,6 @@ struct HostsWorkspaceView: View {
         .onChange(of: appearance) { _, _ in
             applyAppearance()
         }
-        .onChange(of: workspace.selection) { _, _ in
-            resetDetailTitleBarState()
-        }
-        .onChange(of: workspace.selectedProfileID) { _, _ in
-            resetDetailTitleBarState()
-        }
-        .onChange(of: workspace.mode) { _, _ in
-            resetDetailTitleBarState()
-        }
     }
 
     private func handleAppear() {
@@ -273,24 +242,6 @@ struct HostsWorkspaceView: View {
         applyAppearance()
         if !PreviewEnvironment.isRunning {
             workspace.reconcileOnLaunch()
-        }
-    }
-
-    private func updateDetailTitleBarState(for offset: CGFloat) {
-        if detailTitleBarCollapsed {
-            if offset <= 24 {
-                detailTitleBarCollapsed = false
-            }
-        } else if offset >= 96 {
-            detailTitleBarCollapsed = true
-        }
-    }
-
-    private func resetDetailTitleBarState() {
-        // Assigning an unchanged @State value during an interaction can publish
-        // from inside SwiftUI's update transaction.
-        if detailTitleBarCollapsed {
-            detailTitleBarCollapsed = false
         }
     }
 

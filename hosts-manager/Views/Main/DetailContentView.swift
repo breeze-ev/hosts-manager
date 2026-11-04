@@ -10,8 +10,6 @@ struct DetailContentView: View {
     let hasDraftConflict: (Profile) -> Bool
     let onApply: (Profile) -> Void
     let onDiscardDraft: (Profile) -> Void
-    let isTitleBarCollapsed: Bool
-    let onTitleBarScrollOffsetChange: (CGFloat) -> Void
     @EnvironmentObject private var l10n: Localization
 
     @ViewBuilder
@@ -27,9 +25,7 @@ struct DetailContentView: View {
                     isSourceDirty: isSourceDirty(profile),
                     hasDraftConflict: hasDraftConflict(profile),
                     onApply: { onApply(profile) },
-                    onDiscardDraft: { onDiscardDraft(profile) },
-                    isTitleBarCollapsed: isTitleBarCollapsed,
-                    onTitleBarScrollOffsetChange: onTitleBarScrollOffsetChange
+                    onDiscardDraft: { onDiscardDraft(profile) }
                 )
                 .id(profile.id)
             } else {
@@ -40,10 +36,7 @@ struct DetailContentView: View {
                 )
             }
         case .backups:
-            BackupsView(
-                isTitleBarCollapsed: isTitleBarCollapsed,
-                onTitleBarScrollOffsetChange: onTitleBarScrollOffsetChange
-            )
+            BackupsView()
         case .settings:
             SettingsView()
         }
@@ -67,9 +60,7 @@ struct DetailContentView: View {
         isSourceDirty: { _ in false },
         hasDraftConflict: { _ in false },
         onApply: { _ in },
-        onDiscardDraft: { _ in },
-        isTitleBarCollapsed: false,
-        onTitleBarScrollOffsetChange: { _ in }
+        onDiscardDraft: { _ in }
     )
     .environment(\.managedObjectContext, PreviewFixtures.context)
     .environmentObject(Localization())

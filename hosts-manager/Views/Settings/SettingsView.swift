@@ -21,7 +21,6 @@ struct SettingsView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             DetailPageHeader(
-                title: l10n.s("设置", "Settings"),
                 subtitle: l10n.s(
                     "管理默认视图、备份保留、外观与后台写入。",
                     "Manage the default view, backup retention, appearance, and background writes."

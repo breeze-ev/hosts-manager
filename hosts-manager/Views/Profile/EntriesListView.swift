@@ -8,8 +8,6 @@ struct EntriesListView: View {
     let query: String
     @Binding var isAdding: Bool
     let header: AnyView
-    let isHeaderCollapsed: Bool
-    let onScrollOffsetChange: (CGFloat) -> Void
     @Environment(\.managedObjectContext) private var context
     @EnvironmentObject private var l10n: Localization
     @State private var deleteError: String?
@@ -34,9 +32,7 @@ struct EntriesListView: View {
     var body: some View {
         if filtered.isEmpty && !isAdding {
             VStack(alignment: .leading, spacing: 14) {
-                if !isHeaderCollapsed {
-                    header
-                }
+                header
                 VStack(spacing: 14) {
                     if profile.sortedEntries.isEmpty {
                         ContentUnavailableView(
@@ -83,12 +79,12 @@ struct EntriesListView: View {
                         .zebraRowBackground(index)
                     }
                 }
+                .scrollEdgeEffectStyle(.soft, for: .all)
                 .listStyle(.inset)
-                .detailListSafeAreaHeader(isCollapsed: isHeaderCollapsed) {
+                .detailListSafeAreaHeader {
                     header
                 }
                 .background(.clear)
-                .detailHeaderScrollTracking(onScrollOffsetChange)
                 .onChange(of: isAdding) { _, adding in
                     if adding {
                         DispatchQueue.main.async {
@@ -214,7 +210,6 @@ struct EntriesListView: View {
         isAdding: $isAdding,
         header: AnyView(
             DetailPageHeader(
-                title: "预览配置",
                 subtitle: "2 条启用 · 1 条停用",
                 badge: AnyView(
                     Text("未应用")
@@ -229,9 +224,7 @@ struct EntriesListView: View {
                         .buttonStyle(.glass)
                 )
             )
-        ),
-        isHeaderCollapsed: false,
-        onScrollOffsetChange: { _ in }
+        )
     )
     .environment(\.managedObjectContext, PreviewFixtures.context)
     .environmentObject(Localization())

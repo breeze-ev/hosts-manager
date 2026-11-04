@@ -8,7 +8,6 @@ struct SourceEditorView: View {
     let onApply: () -> Void
     let onDiscardDraft: () -> Void
     let toolbarQuery: String
-    let onScrollOffsetChange: (CGFloat) -> Void
     @EnvironmentObject private var l10n: Localization
     @StateObject private var proxy = SourceEditorProxy()
     @State private var showFind = false
@@ -124,8 +123,7 @@ struct SourceEditorView: View {
 
             SourceTextEditor(
                 text: $text,
-                proxy: proxy,
-                onScrollOffsetChange: onScrollOffsetChange
+                proxy: proxy
             )
                 .editorSurface()
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -188,8 +186,7 @@ struct SourceEditorView: View {
         hasDraftConflict: false,
         onApply: {},
         onDiscardDraft: {},
-        toolbarQuery: "",
-        onScrollOffsetChange: { _ in }
+        toolbarQuery: ""
     )
     .environment(\.managedObjectContext, PreviewFixtures.context)
     .environmentObject(Localization())

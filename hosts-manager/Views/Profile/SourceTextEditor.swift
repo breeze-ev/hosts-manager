@@ -241,12 +241,11 @@ private final class LineNumberRulerView: NSRulerView {
 struct SourceTextEditor: NSViewRepresentable {
     @Binding var text: String
     var proxy: SourceEditorProxy
-    let onScrollOffsetChange: (CGFloat) -> Void
 
     func makeCoordinator() -> Coordinator { Coordinator(text: $text, proxy: proxy) }
 
     func makeNSView(context: Context) -> NSScrollView {
-        let scrollView = ScrollTrackingScrollView()
+        let scrollView = NSScrollView()
         scrollView.hasVerticalScroller = true
         scrollView.drawsBackground = false
         scrollView.hasVerticalRuler = true
@@ -271,15 +270,10 @@ struct SourceTextEditor: NSViewRepresentable {
         scrollView.verticalRulerView = LineNumberRulerView(scrollView: scrollView, textView: textView)
         proxy.textView = textView
         Self.applyHighlighting(to: textView)
-        scrollView.onScrollOffsetChange = onScrollOffsetChange
-        DispatchQueue.main.async {
-            scrollView.reportScrollOffset()
-        }
         return scrollView
     }
 
     func updateNSView(_ nsView: NSScrollView, context: Context) {
-        (nsView as? ScrollTrackingScrollView)?.onScrollOffsetChange = onScrollOffsetChange
         guard let tv = nsView.documentView as? NSTextView else { return }
         let changed = tv.string != text
         if changed {
@@ -389,8 +383,7 @@ struct SourceTextEditor: NSViewRepresentable {
 
     SourceTextEditor(
         text: $text,
-        proxy: proxy,
-        onScrollOffsetChange: { _ in }
+        proxy: proxy
     )
     .editorSurface()
     .frame(width: 760, height: 420)
