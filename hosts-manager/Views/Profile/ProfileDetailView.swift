@@ -44,9 +44,9 @@ struct ProfileDetailView: View {
                 }
             }
         }
-        .padding(.horizontal, 22)
-        .padding(.bottom, 22)
-        .padding(.top, mode == .list ? 0 : 22)
+        .padding(.horizontal, DetailPageMetrics.horizontalInset)
+        .padding(.bottom, DetailPageMetrics.bottomInset)
+        .padding(.top, mode == .list ? 0 : DetailPageMetrics.headerTopInset)
         // 不再在出现/切模式时往草稿里写初始文本：sourceText 的 getter 已经会返回
         // 生成好的内容，写入反而会让空配置凭空变成“未应用”状态。
     }

@@ -148,6 +148,7 @@ struct SourceEditorView: View {
             }
             .font(.system(.caption, design: .monospaced))
             .foregroundStyle(.secondary)
+            .padding(10)
         }
         // NSViewRepresentable installs the text view during the SwiftUI update.
         // Defer observable status/find changes until that transaction finishes.

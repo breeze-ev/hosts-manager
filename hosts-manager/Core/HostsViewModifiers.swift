@@ -21,6 +21,7 @@ extension View {
             .safeAreaBar(edge: .top, alignment: .leading, spacing: 0) {
                 header()
                     .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.top, DetailPageMetrics.headerTopInset)
                     .padding(.bottom, 10)
             }
     }

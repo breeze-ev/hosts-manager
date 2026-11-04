@@ -257,6 +257,7 @@ struct SourceTextEditor: NSViewRepresentable {
         textView.font = NSFont.monospacedSystemFont(ofSize: 13, weight: .regular)
         textView.textColor = .labelColor
         textView.drawsBackground = false
+        textView.textContainerInset = NSSize(width: 16, height: 10)
         textView.minSize = NSSize(width: 0, height: contentSize.height)
         textView.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
         textView.isVerticallyResizable = true

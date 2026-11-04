@@ -51,6 +51,7 @@ struct EntriesListView: View {
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
+            .padding(.top, DetailPageMetrics.headerTopInset)
         } else {
             ScrollViewReader { proxy in
                 List {

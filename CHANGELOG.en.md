@@ -2,6 +2,28 @@
 
 [中文](CHANGELOG.md)
 
+## 1.1.0 - 2026-11-04
+
+### Changed
+
+- Reorganized the codebase into a layered architecture, splitting logic that previously lived in a single main view into `Domain`, `Models`, `Services`, `ViewModels`, and `Views`, and separating the apply and write flows for better maintainability and testability.
+- Migrated to the Swift 6 language mode with full strict concurrency checking, hardening background writes and XPC concurrency handling.
+- Added regression tests covering apply planning, write-coordinator recovery, backup maintenance, list-vs-source editing consistency, and Core Data persistence round-trips.
+
+### Improved
+
+- Refined the window and toolbar appearance: the toolbar stays transparent while windowed so the background material shows through, and uses a solid background in full screen; the background material is also tinted for contrast in dark mode so white detail text stays readable.
+- Added an apply-status badge in the main toolbar title area so you can see at a glance which profiles are currently active.
+- Completed and polished the English localization.
+- Refined the spacing and icon details of the inline row action buttons.
+
+### Fixed
+
+- Fixed backup-pruning order: records without a backing file are removed before pruning files beyond the retention limit, and at least one valid backup is always kept, avoiding dangling records that cannot be restored or deleting restorable backups by mistake.
+- Enforced persisted-state recovery after writes: if a file was written but the database commit failed, further writes are still paused with a recovery path so profile switches and the system file cannot silently diverge.
+- Fixed Transformable attributes in Core Data that could not be persisted correctly.
+- Isolated Preview side effects so previews use an in-memory database, temporary directories, and separate preferences.
+
 ## 1.0.1 - 2026-10-29
 
 ### Added

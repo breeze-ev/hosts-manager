@@ -22,6 +22,7 @@ struct BackupsView: View {
                     ContentUnavailableView(l10n.s("暂无备份", "No backups"), systemImage: "clock.arrow.circlepath")
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
+                .padding(.top, DetailPageMetrics.headerTopInset)
             } else {
                 List {
                     ForEach(Array(backups.enumerated()), id: \.element.id) { index, backup in
@@ -46,8 +47,8 @@ struct BackupsView: View {
                 .background(.clear)
             }
         }
-        .padding(.horizontal, 22)
-        .padding(.bottom, 22)
+        .padding(.horizontal, DetailPageMetrics.horizontalInset)
+        .padding(.bottom, DetailPageMetrics.bottomInset)
         .sheet(item: $previewBackup) { backup in
             BackupPreviewSheet(backup: backup) {
                 previewBackup = nil

@@ -20,6 +20,7 @@ struct SettingsView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
+            
             DetailPageHeader(
                 subtitle: l10n.s(
                     "管理默认视图、备份保留、外观与后台写入。",
@@ -37,7 +38,9 @@ struct SettingsView: View {
                 .padding(.bottom, 16)
             }
         }
-        .padding(22)
+        .padding(.horizontal, DetailPageMetrics.horizontalInset)
+        .padding(.bottom, DetailPageMetrics.bottomInset)
+        .padding(.top, DetailPageMetrics.headerTopInset)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .onAppear {
             refreshHelperStatus()

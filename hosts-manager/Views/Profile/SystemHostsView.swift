@@ -37,12 +37,14 @@ struct SystemHostsView: View {
                         ContentUnavailableView(l10n.s("无法读取 /etc/hosts", "Could not read /etc/hosts"), systemImage: "exclamationmark.triangle")
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
                     }
+                    .padding(.top, DetailPageMetrics.headerTopInset)
                 } else if filtered.isEmpty {
                     VStack(alignment: .leading, spacing: 14) {
                         header
                         ContentUnavailableView(l10n.s("没有匹配的条目", "No matching entries"), systemImage: "magnifyingglass")
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
                     }
+                    .padding(.top, DetailPageMetrics.headerTopInset)
                 } else {
                     List {
                         ForEach(Array(filtered.enumerated()), id: \.element.id) { index, entry in

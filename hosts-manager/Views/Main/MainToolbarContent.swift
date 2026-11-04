@@ -16,7 +16,7 @@ struct MainToolbarContent: ToolbarContent {
         ToolbarItem(placement: .navigation) {
             HStack(spacing: 8) {
                 Text(title)
-                    .font(.headline)
+                    .font(.title2)
                     .lineLimit(1)
                     .truncationMode(.tail)
                     .layoutPriority(1)
@@ -29,7 +29,7 @@ struct MainToolbarContent: ToolbarContent {
 
                 Spacer(minLength: 0)
             }
-            .padding(10)
+            .padding(4)
             .frame(minWidth: ToolbarTitleLayout.minimumWidth, alignment: .leading)
         }
         .sharedBackgroundVisibility(.hidden)
