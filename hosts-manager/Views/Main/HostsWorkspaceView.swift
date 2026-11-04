@@ -109,7 +109,7 @@ struct HostsWorkspaceView: View {
                 onExport: exportSelectedProfile
             )
         }
-        .toolbarBackgroundVisibility(.hidden, for: .windowToolbar)
+        .modifier(WindowToolbarBackground())
         .buttonBorderShape(.capsule)
         .sheet(
             isPresented: $workspace.showApply,
