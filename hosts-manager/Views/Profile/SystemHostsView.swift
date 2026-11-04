@@ -98,11 +98,14 @@ struct SystemHostsView: View {
                             content: raw,
                             query: query
                         )
-                            .padding(12)
+                            .padding(10)
                             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                             .editorSurface(cornerRadius: 14)
                     }
+                    
                 }
+                .padding(.bottom, 10)
+                
             }
         }
         .onAppear {
@@ -123,7 +126,7 @@ struct SystemHostsView: View {
 
 #Preview("System Hosts") {
     SystemHostsView(
-        mode: .list,
+        mode: .source,
         query: "",
         header: AnyView(
             DetailPageHeader(
