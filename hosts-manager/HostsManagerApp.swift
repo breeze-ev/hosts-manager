@@ -4,11 +4,15 @@ import AppKit
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationWillFinishLaunching(_ notification: Notification) {
+        NSWindow.allowsAutomaticWindowTabbing = false
         let language = UserDefaults.standard.string(forKey: "language") ?? "system"
         LocalizationPreference.applyAppleLanguages(for: language)
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        for window in NSApp.windows {
+            window.tabbingMode = .disallowed
+        }
         SparkleUpdater.shared.start()
         updateAppMenuTitle()
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
