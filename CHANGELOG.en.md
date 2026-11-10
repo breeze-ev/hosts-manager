@@ -2,6 +2,17 @@
 
 [中文](CHANGELOG.md)
 
+## 1.1.1 - 2026-11-10
+
+### Adjustments
+
+- Disabled automatic macOS window tabbing, so windows no longer show a tab bar that breaks the single-window layout.
+- Adjusted padding in the read-only `/etc/hosts` source view for more consistent spacing around the content.
+
+### Fixed
+
+- Fixed keystrokes being swallowed and the trailing newline being lost when pressing Return on the last line of the source editor, with a regression test.
+
 ## 1.1.0 - 2026-11-04
 
 ### Adjustments
