@@ -4,35 +4,31 @@ IMPORTANT: This file was signed by Sparkle. Any modifications to this file requi
     <channel>
         <title>Hosts Manager</title>
         <item>
-            <title>1.1.0</title>
-            <pubDate>Wed, 04 Nov 2026 12:21:36 +0800</pubDate>
+            <title>1.1.1</title>
+            <pubDate>Tue, 10 Nov 2026 15:03:09 +0800</pubDate>
             <link>https://breeze-ev.github.io/hosts-manager/</link>
-            <sparkle:version>26</sparkle:version>
-            <sparkle:shortVersionString>1.1.0</sparkle:shortVersionString>
+            <sparkle:version>27</sparkle:version>
+            <sparkle:shortVersionString>1.1.1</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>26.0</sparkle:minimumSystemVersion>
             <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
             <description><![CDATA[<style>body{background:#fff;color:#1d1d1f;font:14px -apple-system,BlinkMacSystemFont,"SF Pro Text",sans-serif;line-height:1.55;padding:8px 4px}h2{font-size:20px;margin:0 0 12px}h3{font-size:15px;margin:18px 0 8px}code{background:#f2f2f7;border-radius:4px;padding:1px 4px}li{margin:4px 0}</style>
-<h2>Hosts Manager 1.1.0</h2>
+<h2>Hosts Manager 1.1.1</h2>
 <h3 id="调整">调整</h3>
 <ul>
-<li>重构了代码结构，把主界面里集中在一起的逻辑拆分到独立模块，便于维护和测试。</li>
-<li>迁移到 Swift 6，加固了后台写入与助手并发处理。</li>
-<li>细化了窗口与工具栏外观：窗口化时工具栏保持半透明，全屏时显示实心背景；深色模式下背景文字对比度更好。</li>
-<li>工具栏新增当前配置应用状态提示；补充并完善了英文界面文案。</li>
-<li>增加回归测试覆盖应用、写入恢复与备份清理等关键流程。</li>
-<li>统一了配置、备份与设置页面的边距，并调整了源码编辑器的内边距。</li>
+<li>关闭 macOS
+自动窗口标签页，窗口不再出现标签页栏，避免破坏单窗口界面布局。</li>
+<li>微调 <code>/etc/hosts</code>
+只读源码视图的内边距，改善内容与窗口边缘的留白。</li>
 </ul>
 <h3 id="修复">修复</h3>
 <ul>
-<li>修复备份清理顺序，避免删除仍可还原的备份。</li>
-<li>修复文件写入成功但状态保存失败时配置与系统文件不同步的问题。</li>
-<li>修复 Core Data 部分属性无法正常持久化的问题。</li>
+<li>修复源码编辑器在最后一行按回车时输入被吞掉、文件末尾换行无法保留的问题，并补充回归测试。</li>
 </ul>
 ]]></description>
-            <enclosure url="https://github.com/breeze-ev/hosts-manager/releases/download/1.1.0/Hosts-Manager-1.1.0-26-arm64.dmg" length="4269257" type="application/octet-stream" sparkle:edSignature="w75wEirej/+3n9Va+WwI8EAN6d83K90SCY8R3eiZdOqbwt6QySAppR/tM2mg57zhqr0yjJW7QBekG9C+vLGNDA=="></enclosure>
+            <enclosure url="https://github.com/breeze-ev/hosts-manager/releases/download/1.1.1/Hosts-Manager-1.1.1-27-arm64.dmg" length="4270269" type="application/octet-stream" sparkle:edSignature="lrwRotG8UFaDv+/uhxPulF0zs3m4tIkk2cdqVgkbVIPEQh+bOKVRrg7Vn2B+1U7fWxRyj86Ijzd5WcYgDDF2CA=="></enclosure>
         </item>
     </channel>
 </rss><!-- sparkle-signatures:
-edSignature: T7HlpFfcSGIsrn+nGVdEP5K6qBRkUswQJuQ5Wucrgk0bTJtwFxfhkQMbqtpng8ydOH/X7WsW5xVOvhV8uyV3DA==
-length: 2557
+edSignature: mZMFNyo6qi696AJMUmXybgQSQP0++v+5LmB5K0EYwtPumFUTVg6C7rGKkogaNcCxveqKYVBFUUNLKVwBp8xgCw==
+length: 2039
 -->
