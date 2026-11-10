@@ -53,7 +53,14 @@ struct HostsManagerApp: App {
             .environmentObject(l10n)
         }
         .windowToolbarStyle(.unified)
+        Window(isEnglish ? "About Hosts Manager" : "关于 Hosts Manager", id: AboutWindow.id) {
+            AboutView()
+                .environmentObject(l10n)
+        }
+        .windowResizability(.contentSize)
+        .defaultPosition(.center)
         .commands {
+            AboutCommands(isEnglish: isEnglish)
             CommandGroup(after: .appInfo) {
                 Button(isEnglish ? "Check for Updates…" : "检查更新…") {
                     SparkleUpdater.shared.checkForUpdates()
@@ -85,5 +92,18 @@ struct HostsManagerApp: App {
             }
         }
 
+    }
+}
+
+private struct AboutCommands: Commands {
+    let isEnglish: Bool
+    @Environment(\.openWindow) private var openWindow
+
+    var body: some Commands {
+        CommandGroup(replacing: .appInfo) {
+            Button(isEnglish ? "About Hosts Manager" : "关于 Hosts Manager") {
+                openWindow(id: AboutWindow.id)
+            }
+        }
     }
 }
